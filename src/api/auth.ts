@@ -6,6 +6,7 @@ import {
   setRefreshToken,
   setRole,
 } from '../auth/tokens';
+import { USE_MOCK, mockFetch } from '../mock';
 import type { AuthenticatedUser } from './types';
 
 export type AuthTokens = {
@@ -85,7 +86,7 @@ async function parseErrorMessage(response: Response, fallback: string): Promise<
 }
 
 export async function login(email: string, password: string): Promise<AuthTokens> {
-  const response = await fetch(buildUrl(authPath('/login')), {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/login')), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -111,7 +112,7 @@ export async function refreshTokens(): Promise<AuthTokens> {
     throw new Error('Missing refresh token');
   }
 
-  const response = await fetch(buildUrl(authPath('/refresh')), {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/refresh')), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

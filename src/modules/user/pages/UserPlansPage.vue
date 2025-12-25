@@ -1,5 +1,18 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { userApi } from '../../../api';
 import { formatBytes, formatCurrency } from '../../../utils/format';
 import type { CreateUserOrderResponse, UserPlanSummary } from '../../../api/types';
@@ -50,7 +63,7 @@ const filteredPlans = computed(() => {
       : Math.round(filters.maxPrice * 100);
 
   return plans.value.filter((plan) => {
-    if (filters.tag && !plan.tags?.includes(filters.tag)) {
+    if (filters.tag && filters.tag !== '__all__' && !plan.tags?.includes(filters.tag)) {
       return false;
     }
     if (minCents !== null && plan.price_cents < minCents) {
@@ -64,11 +77,11 @@ const filteredPlans = computed(() => {
 });
 
 const priceShortcuts = [
-  { label: 'Under 10', min: null, max: 10 },
+  { label: '低于 10', min: null, max: 10 },
   { label: '10 - 25', min: 10, max: 25 },
   { label: '25 - 50', min: 25, max: 50 },
   { label: '50 - 100', min: 50, max: 100 },
-  { label: '100+', min: 100, max: null },
+  { label: '100 以上', min: 100, max: null },
 ];
 
 function applyPriceRange(min: number | null, max: number | null) {
@@ -86,12 +99,29 @@ function clearPriceRange() {
 function getHighlightLabel(plan: UserPlanSummary): string | null {
   const tags = plan.tags?.map((tag) => tag.toLowerCase()) ?? [];
   if (tags.some((tag) => tag === 'hot' || tag === 'popular')) {
-    return 'Hot';
+    return '热门';
   }
   if (tags.some((tag) => tag === 'recommended' || tag === 'recommend' || tag === 'featured')) {
-    return 'Recommended';
+    return '推荐';
   }
   return null;
+}
+
+function orderStatusLabel(value?: string) {
+  switch (value) {
+    case 'pending_payment':
+      return '待支付';
+    case 'paid':
+      return '已支付';
+    case 'payment_failed':
+      return '支付失败';
+    case 'cancelled':
+      return '已取消';
+    case 'refunded':
+      return '已退款';
+    default:
+      return value || '未知';
+  }
 }
 
 const totalCents = computed(() => {
@@ -119,7 +149,7 @@ async function loadPlans() {
     });
     plans.value = response.plans ?? [];
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load plans';
+    errorMessage.value = error instanceof Error ? error.message : '加载套餐失败';
   } finally {
     loading.value = false;
   }
@@ -140,7 +170,7 @@ async function submitOrder() {
   orderLoading.value = true;
 
   if (!orderForm.plan_id) {
-    orderError.value = 'Select a plan before placing an order.';
+    orderError.value = '请先选择套餐再下单。';
     orderLoading.value = false;
     return;
   }
@@ -151,7 +181,7 @@ async function submitOrder() {
   }
 
   if (orderForm.payment_method === 'external' && !orderForm.payment_channel) {
-    orderError.value = 'External payments require a payment channel.';
+    orderError.value = '使用外部支付时必须填写支付通道。';
     orderLoading.value = false;
     return;
   }
@@ -168,9 +198,9 @@ async function submitOrder() {
       idempotency_key: createIdempotencyKey(),
     });
     orderResult.value = response;
-    orderMessage.value = `Order #${response.order.number} created.`;
+    orderMessage.value = `订单 #${response.order.number} 创建成功。`;
   } catch (error) {
-    orderError.value = error instanceof Error ? error.message : 'Failed to create order';
+    orderError.value = error instanceof Error ? error.message : '创建订单失败';
   } finally {
     orderLoading.value = false;
   }
@@ -185,206 +215,233 @@ onMounted(() => {
   <div class="page-section">
     <header class="page-section__header">
       <div>
-        <p class="page__eyebrow">Plans</p>
-        <h3 class="page-section__title">Available plans</h3>
-        <p class="page__subtitle">Browse plans and create orders directly.</p>
+        <p class="page__eyebrow">套餐</p>
+        <h3 class="page-section__title">可用套餐</h3>
+        <p class="page__subtitle">浏览套餐并直接下单。</p>
       </div>
       <div class="page-section__actions">
-        <button class="button button--ghost" type="button" @click="loadPlans" :disabled="loading">
-          {{ loading ? 'Refreshing...' : 'Refresh' }}
-        </button>
+        <Button variant="secondary" type="button" @click="loadPlans" :disabled="loading">
+          {{ loading ? '刷新中...' : '刷新列表' }}
+        </Button>
       </div>
     </header>
 
-    <form class="filter-bar" @submit.prevent="loadPlans">
-      <label class="form__field form__field--compact">
-        <span>Search</span>
-        <input v-model="filters.q" type="search" placeholder="Search plans" />
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Tag</span>
-        <select v-model="filters.tag">
-          <option value="">All</option>
-          <option v-for="tag in availableTags" :key="tag" :value="tag">{{ tag }}</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Min price</span>
-        <input v-model.number="filters.minPrice" type="number" min="0" step="0.01" placeholder="0.00" />
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Max price</span>
-        <input v-model.number="filters.maxPrice" type="number" min="0" step="0.01" placeholder="99.00" />
-      </label>
-      <button class="button" type="submit" :disabled="loading">Apply</button>
+    <form class="form-grid" @submit.prevent="loadPlans">
+      <div class="stack stack--tight">
+        <Label>搜索</Label>
+        <Input v-model="filters.q" type="search" placeholder="套餐名称" />
+      </div>
+      <div class="stack stack--tight">
+        <Label>标签</Label>
+        <Select v-model="filters.tag">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem v-for="tag in availableTags" :key="tag" :value="tag">
+              {{ tag }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>最低价</Label>
+        <Input v-model.number="filters.minPrice" type="number" min="0" step="0.01" placeholder="0.00" />
+      </div>
+      <div class="stack stack--tight">
+        <Label>最高价</Label>
+        <Input v-model.number="filters.maxPrice" type="number" min="0" step="0.01" placeholder="99.00" />
+      </div>
+      <div class="cluster cluster--end">
+        <Button type="submit" :disabled="loading">应用筛选</Button>
+      </div>
     </form>
-    <div class="shortcut-bar">
-      <span class="shortcut-bar__label">Quick ranges</span>
-      <button
+
+    <div class="cluster cluster--center text-sm">
+      <span class="text-muted-foreground">快捷区间</span>
+      <Button
         v-for="shortcut in priceShortcuts"
         :key="shortcut.label"
-        class="chip"
+        variant="outline"
+        size="sm"
         type="button"
         @click="applyPriceRange(shortcut.min, shortcut.max)"
       >
         {{ shortcut.label }}
-      </button>
-      <button class="chip chip--ghost" type="button" @click="clearPriceRange">Clear</button>
+      </Button>
+      <Button variant="ghost" size="sm" type="button" @click="clearPriceRange">清除</Button>
     </div>
-    <p class="hint">Price filters use major currency units (e.g. 9.99).</p>
+    <p class="text-xs text-muted-foreground">价格筛选以主币种单位（例如 9.99）。</p>
 
-    <p v-if="errorMessage" class="alert">{{ errorMessage }}</p>
+    <Alert v-if="errorMessage" variant="destructive">
+      <AlertTitle>加载失败</AlertTitle>
+      <AlertDescription>{{ errorMessage }}</AlertDescription>
+    </Alert>
 
-    <div class="panel-grid">
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Create order</h3>
-            <p class="panel-card__meta">POST /user/orders</p>
-          </div>
-        </header>
-        <form class="form" @submit.prevent="submitOrder">
-          <label class="form__field">
-            <span>Plan</span>
-            <select v-model.number="orderForm.plan_id">
-              <option value="0">Select a plan</option>
-              <option v-for="plan in filteredPlans" :key="plan.id" :value="plan.id">
-                {{ plan.name }} · {{ formatCurrency(plan.price_cents, plan.currency) }}
-              </option>
-            </select>
-          </label>
-          <div v-if="selectedPlan" class="order-summary order-summary--compact">
-            <div>
-              <p class="order-summary__label">Selected plan</p>
-              <p class="order-summary__value">{{ selectedPlan.name }}</p>
+    <div class="split-grid">
+      <Card>
+        <CardHeader>
+          <CardTitle>创建订单</CardTitle>
+          <p class="panel-card__meta">POST /user/orders</p>
+        </CardHeader>
+        <CardContent>
+          <form class="stack" @submit.prevent="submitOrder">
+            <div class="stack stack--tight">
+              <Label>套餐</Label>
+              <Select v-model.number="orderForm.plan_id">
+                <SelectTrigger>
+                  <SelectValue placeholder="选择套餐" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">请选择套餐</SelectItem>
+                  <SelectItem v-for="plan in filteredPlans" :key="plan.id" :value="plan.id">
+                    {{ plan.name }} · {{ formatCurrency(plan.price_cents, plan.currency) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div v-if="getHighlightLabel(selectedPlan)">
-              <p class="order-summary__label">Badge</p>
-              <p class="order-summary__value">{{ getHighlightLabel(selectedPlan) }}</p>
+            <div v-if="selectedPlan" class="detail-grid">
+              <div>
+                <p class="detail-label">已选套餐</p>
+                <p class="detail-value">{{ selectedPlan.name }}</p>
+              </div>
+              <div v-if="getHighlightLabel(selectedPlan)">
+                <p class="detail-label">标签</p>
+                <p class="detail-value">{{ getHighlightLabel(selectedPlan) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">单价</p>
+                <p class="detail-value">
+                  {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
+                </p>
+              </div>
+              <div>
+                <p class="detail-label">总价</p>
+                <p class="detail-value">
+                  {{ formatCurrency(totalCents ?? 0, selectedPlan.currency) }}
+                </p>
+              </div>
             </div>
-            <div>
-              <p class="order-summary__label">Unit price</p>
-              <p class="order-summary__value">
-                {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
-              </p>
+            <p v-else class="panel-card__empty">请选择套餐以查看价格详情。</p>
+            <div class="stack stack--tight">
+              <Label>数量</Label>
+              <Input v-model.number="orderForm.quantity" type="number" min="1" />
             </div>
-            <div>
-              <p class="order-summary__label">Total</p>
-              <p class="order-summary__value">
-                {{ formatCurrency(totalCents ?? 0, selectedPlan.currency) }}
-              </p>
+            <div class="stack stack--tight">
+              <Label>支付方式</Label>
+              <Select v-model="orderForm.payment_method">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="balance">余额</SelectItem>
+                  <SelectItem value="external">外部</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          </div>
-          <p v-else class="panel-card__empty">Pick a plan to see pricing details.</p>
-          <label class="form__field">
-            <span>Quantity</span>
-            <input v-model.number="orderForm.quantity" type="number" min="1" />
-          </label>
-          <label class="form__field">
-            <span>Payment method</span>
-            <select v-model="orderForm.payment_method">
-              <option value="balance">Balance</option>
-              <option value="external">External</option>
-            </select>
-          </label>
-          <label class="form__field" :class="{ 'form__field--hidden': orderForm.payment_method !== 'external' }">
-            <span>Payment channel</span>
-            <input v-model="orderForm.payment_channel" type="text" placeholder="e.g. stripe" />
-          </label>
-          <label class="form__field" :class="{ 'form__field--hidden': orderForm.payment_method !== 'external' }">
-            <span>Return URL</span>
-            <input v-model="orderForm.payment_return_url" type="url" placeholder="https://example.com/return" />
-          </label>
-          <p v-if="orderForm.payment_method === 'external'" class="hint">
-            External payments create pending orders. Use the return URL for gateway redirects.
+            <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
+              <Label>支付通道</Label>
+              <Input v-model="orderForm.payment_channel" type="text" placeholder="例如 stripe" />
+            </div>
+            <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
+              <Label>回跳地址</Label>
+              <Input v-model="orderForm.payment_return_url" type="url" placeholder="https://example.com/return" />
+            </div>
+            <p v-if="orderForm.payment_method === 'external'" class="text-xs text-muted-foreground">
+              外部支付会创建待支付订单，可通过回跳地址完成跳转。
+            </p>
+            <Button type="submit" :disabled="orderLoading">
+              {{ orderLoading ? '提交中...' : '创建订单' }}
+            </Button>
+            <Alert v-if="orderMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+              <AlertTitle>下单成功</AlertTitle>
+              <AlertDescription>{{ orderMessage }}</AlertDescription>
+            </Alert>
+            <Alert v-if="orderError" variant="destructive">
+              <AlertTitle>下单失败</AlertTitle>
+              <AlertDescription>{{ orderError }}</AlertDescription>
+            </Alert>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>套餐列表</CardTitle>
+          <p class="panel-card__meta">当前可选套餐</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载套餐...</p>
+          <p v-else-if="filteredPlans.length === 0" class="panel-card__empty">
+            当前筛选条件下暂无套餐。
           </p>
-          <button class="button button--primary" type="submit" :disabled="orderLoading">
-            {{ orderLoading ? 'Submitting...' : 'Create order' }}
-          </button>
-          <p v-if="orderMessage" class="alert alert--success">{{ orderMessage }}</p>
-          <p v-if="orderError" class="alert alert--danger">{{ orderError }}</p>
-        </form>
-      </article>
+          <ul v-else class="data-list">
+            <li
+              v-for="plan in filteredPlans"
+              :key="plan.id"
+              :class="['data-row', 'data-row--stack', { 'data-row--selected': orderForm.plan_id === plan.id }]"
+            >
+              <div>
+                <p class="data-row__title">{{ plan.name }}</p>
+                <p class="data-row__meta">
+                  {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} 天
+                </p>
+                <p class="data-row__meta">
+                  {{ formatBytes(plan.traffic_limit_bytes) }} · 设备 {{ plan.devices_limit ?? '-' }}
+                </p>
+                <div class="cluster">
+                  <Badge v-if="getHighlightLabel(plan)" variant="default">{{ getHighlightLabel(plan) }}</Badge>
+                  <Badge v-for="feature in plan.features?.slice(0, 4) || []" :key="feature" variant="secondary">
+                    {{ feature }}
+                  </Badge>
+                </div>
+              </div>
+              <div class="data-row__aside">
+                <Button variant="ghost" size="sm" type="button" @click="selectPlan(plan)">
+                  选择
+                </Button>
+              </div>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
 
-      <article class="panel-card panel-card--full">
-        <header class="panel-card__header">
-          <div>
-            <h3>Plans</h3>
-            <p class="panel-card__meta">Available offerings</p>
-          </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading plans...</div>
-        <div v-else-if="filteredPlans.length === 0" class="panel-card__empty">
-          No plans available for the current filters.
-        </div>
-        <ul v-else class="data-list">
-          <li
-            v-for="plan in filteredPlans"
-            :key="plan.id"
-            :class="['data-row', 'data-row--stack', { 'data-row--selected': orderForm.plan_id === plan.id }]"
-          >
+      <Card v-if="orderResult" class="panel-card--full">
+        <CardHeader>
+          <CardTitle>订单结果</CardTitle>
+          <p class="panel-card__meta">最近一次下单结果</p>
+        </CardHeader>
+        <CardContent>
+          <div class="detail-grid">
             <div>
-              <p class="data-row__title">{{ plan.name }}</p>
-              <p class="data-row__meta">
-                {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} days
-              </p>
-              <p class="data-row__meta">
-                {{ formatBytes(plan.traffic_limit_bytes) }} · Devices {{ plan.devices_limit ?? '-' }}
-              </p>
-              <div v-if="plan.features?.length" class="tag-list">
-                <span v-if="getHighlightLabel(plan)" class="tag tag--highlight">
-                  {{ getHighlightLabel(plan) }}
-                </span>
-                <span v-for="feature in plan.features.slice(0, 4)" :key="feature" class="tag">
-                  {{ feature }}
-                </span>
-              </div>
-              <div v-else-if="getHighlightLabel(plan)" class="tag-list">
-                <span class="tag tag--highlight">{{ getHighlightLabel(plan) }}</span>
-              </div>
+              <p class="detail-label">订单号</p>
+              <p class="detail-value">#{{ orderResult.order.number }}</p>
             </div>
-            <div class="data-row__aside">
-              <button class="button button--ghost" type="button" @click="selectPlan(plan)">
-                Select
-              </button>
+            <div>
+              <p class="detail-label">状态</p>
+              <p class="detail-value">{{ orderStatusLabel(orderResult.order.status) }}</p>
             </div>
-          </li>
-        </ul>
-      </article>
-
-      <article v-if="orderResult" class="panel-card panel-card--full">
-        <header class="panel-card__header">
-          <div>
-            <h3>Order result</h3>
-            <p class="panel-card__meta">Latest order response</p>
+            <div>
+              <p class="detail-label">订单金额</p>
+              <p class="detail-value">
+                {{ formatCurrency(orderResult.order.total_cents, orderResult.order.currency) }}
+              </p>
+            </div>
+            <div>
+              <p class="detail-label">余额</p>
+              <p class="detail-value">
+                {{ formatCurrency(orderResult.balance.balance_cents, orderResult.balance.currency) }}
+              </p>
+            </div>
           </div>
-        </header>
-        <div class="order-summary">
-          <div>
-            <p class="order-summary__label">Order</p>
-            <p class="order-summary__value">#{{ orderResult.order.number }}</p>
+          <div v-if="orderResult.order.payment_intent_id" class="panel-card__empty">
+            支付意向：{{ orderResult.order.payment_intent_id }}
           </div>
-          <div>
-            <p class="order-summary__label">Status</p>
-            <p class="order-summary__value">{{ orderResult.order.status }}</p>
-          </div>
-          <div>
-            <p class="order-summary__label">Total</p>
-            <p class="order-summary__value">
-              {{ formatCurrency(orderResult.order.total_cents, orderResult.order.currency) }}
-            </p>
-          </div>
-          <div>
-            <p class="order-summary__label">Balance</p>
-            <p class="order-summary__value">
-              {{ formatCurrency(orderResult.balance.balance_cents, orderResult.balance.currency) }}
-            </p>
-          </div>
-        </div>
-        <div v-if="orderResult.order.payment_intent_id" class="panel-card__empty">
-          Payment intent: {{ orderResult.order.payment_intent_id }}
-        </div>
-      </article>
+        </CardContent>
+      </Card>
     </div>
   </div>
 </template>
+
+

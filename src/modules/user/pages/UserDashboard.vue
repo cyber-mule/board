@@ -1,5 +1,9 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { userApi } from '../../../api';
 import { formatBytes, formatCurrency, formatDate, formatDateTime } from '../../../utils/format';
 import type {
@@ -18,23 +22,58 @@ const orders = ref<OrderDetail[]>([]);
 const loading = ref(true);
 const errorMessage = ref('');
 
-function statusTone(value?: string): string {
+const sectionLabels: Record<string, string> = {
+  balance: '余额',
+  subscriptions: '订阅',
+  plans: '套餐',
+  announcements: '公告',
+  orders: '订单',
+};
+
+function statusVariant(value?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (value) {
     case 'active':
     case 'paid':
     case 'succeeded':
-      return 'status-pill status-pill--ok';
+      return 'default';
     case 'pending':
     case 'pending_payment':
-      return 'status-pill status-pill--warn';
+      return 'secondary';
     case 'failed':
     case 'payment_failed':
     case 'cancelled':
     case 'refunded':
     case 'expired':
-      return 'status-pill status-pill--danger';
+      return 'destructive';
     default:
-      return 'status-pill status-pill--muted';
+      return 'outline';
+  }
+}
+
+function statusLabel(value?: string) {
+  switch (value) {
+    case 'active':
+      return '已激活';
+    case 'pending':
+      return '待处理';
+    case 'pending_payment':
+      return '待支付';
+    case 'paid':
+      return '已支付';
+    case 'succeeded':
+      return '成功';
+    case 'failed':
+      return '失败';
+    case 'payment_failed':
+      return '支付失败';
+    case 'cancelled':
+      return '已取消';
+    case 'refunded':
+      return '已退款';
+    case 'expired':
+      return '已过期';
+    default:
+      return value || '未知';
   }
 }
 
@@ -88,7 +127,8 @@ async function loadData() {
   }
 
   if (errors.length) {
-    errorMessage.value = `Failed to load ${errors.join(', ')}. Check API connectivity.`;
+    const labels = errors.map(key => sectionLabels[key] || key).join('、');
+    errorMessage.value = `部分模块加载失败：${labels}。请检查 API 连接。`;
   }
 
   loading.value = false;
@@ -103,168 +143,174 @@ onMounted(() => {
   <div class="page-section">
     <header class="page-section__header">
       <div>
-        <p class="page__eyebrow">Overview</p>
-        <h3 class="page-section__title">Account snapshot</h3>
-        <p class="page__subtitle">Subscriptions, balance, and orders powered by the user API.</p>
+        <p class="page__eyebrow">概览</p>
+        <h3 class="page-section__title">账户总览</h3>
+        <p class="page__subtitle">展示订阅、余额与订单状态。</p>
       </div>
       <div class="page-section__actions">
-        <button class="button button--ghost" type="button" @click="loadData" :disabled="loading">
-          {{ loading ? 'Refreshing...' : 'Refresh' }}
-        </button>
+        <Button variant="secondary" type="button" @click="loadData" :disabled="loading">
+          {{ loading ? '刷新中...' : '刷新数据' }}
+        </Button>
       </div>
     </header>
 
-    <p v-if="errorMessage" class="alert">{{ errorMessage }}</p>
+    <Alert v-if="errorMessage" variant="destructive">
+      <AlertTitle>加载失败</AlertTitle>
+      <AlertDescription>{{ errorMessage }}</AlertDescription>
+    </Alert>
 
-    <div class="panel-grid">
-      <article class="panel-card panel-card--full">
-        <header class="panel-card__header">
+    <div class="split-grid">
+      <Card class="panel-card--full">
+        <CardHeader class="cluster cluster--between cluster--center">
           <div>
-            <h3>Balance</h3>
+            <CardTitle>余额</CardTitle>
             <p class="panel-card__meta">/account/balance</p>
           </div>
-          <span v-if="balance" class="panel-card__headline">
+          <span v-if="balance" class="text-2xl font-semibold">
             {{ formatCurrency(balance.balance_cents, balance.currency) }}
           </span>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading balance...</div>
-        <div v-else-if="!balance" class="panel-card__empty">Balance data unavailable.</div>
-        <div v-else class="balance">
-          <div class="balance__meta">
-            <div>
-              <p class="balance__label">Last updated</p>
-              <p class="balance__value">{{ formatDateTime(balance.updated_at) }}</p>
-            </div>
-            <div>
-              <p class="balance__label">Recent transactions</p>
-              <p class="balance__value">{{ balance.transactions.length }}</p>
-            </div>
-          </div>
-          <ul v-if="balance.transactions.length" class="data-list data-list--compact">
-            <li v-for="entry in balance.transactions" :key="entry.id" class="data-row">
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载余额...</p>
+          <p v-else-if="!balance" class="panel-card__empty">余额数据不可用。</p>
+          <div v-else class="stack">
+            <div class="detail-grid">
               <div>
-                <p class="data-row__title">{{ entry.description || entry.entry_type }}</p>
-                <p class="data-row__meta">{{ formatDateTime(entry.created_at) }}</p>
+                <p class="detail-label">最近更新</p>
+                <p class="detail-value">{{ formatDateTime(balance.updated_at) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">交易笔数</p>
+                <p class="detail-value">{{ balance.transactions.length }}</p>
+              </div>
+            </div>
+            <ul v-if="balance.transactions.length" class="data-list data-list--compact">
+              <li v-for="entry in balance.transactions" :key="entry.id" class="data-row">
+                <div>
+                  <p class="data-row__title">{{ entry.description || entry.entry_type }}</p>
+                  <p class="data-row__meta">{{ formatDateTime(entry.created_at) }}</p>
+                </div>
+                <div class="data-row__aside">
+                  <Badge variant="outline">{{ entry.entry_type }}</Badge>
+                  <span class="data-row__title">
+                    {{ formatCurrency(entry.amount_cents, entry.currency) }}
+                  </span>
+                </div>
+              </li>
+            </ul>
+            <div v-else class="panel-card__empty">暂无交易记录。</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>订阅</CardTitle>
+          <p class="panel-card__meta">当前可用订阅</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载订阅...</p>
+          <p v-else-if="subscriptions.length === 0" class="panel-card__empty">
+            暂无订阅。
+          </p>
+          <ul v-else class="data-list">
+            <li v-for="subscription in subscriptions" :key="subscription.id" class="data-row">
+              <div>
+                <p class="data-row__title">{{ subscription.name }}</p>
+                <p class="data-row__meta">
+                  {{ subscription.plan_name || '未绑定套餐' }} · 到期
+                  {{ formatDate(subscription.expires_at) }}
+                </p>
               </div>
               <div class="data-row__aside">
-                <span class="tag">{{ entry.entry_type }}</span>
-                <span class="data-row__title">
-                  {{ formatCurrency(entry.amount_cents, entry.currency) }}
+                <Badge :variant="statusVariant(subscription.status)">{{ statusLabel(subscription.status) }}</Badge>
+                <span class="data-row__meta">
+                  {{ formatBytes(subscription.traffic_used_bytes) }} /
+                  {{ formatBytes(subscription.traffic_total_bytes) }}
                 </span>
               </div>
             </li>
           </ul>
-          <div v-else class="panel-card__empty">No transactions yet.</div>
-        </div>
-      </article>
+        </CardContent>
+      </Card>
 
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Subscriptions</h3>
-            <p class="panel-card__meta">Active access</p>
-          </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading subscriptions...</div>
-        <div v-else-if="subscriptions.length === 0" class="panel-card__empty">
-          No subscriptions yet.
-        </div>
-        <ul v-else class="data-list">
-          <li v-for="subscription in subscriptions" :key="subscription.id" class="data-row">
-            <div>
-              <p class="data-row__title">{{ subscription.name }}</p>
-              <p class="data-row__meta">
-                {{ subscription.plan_name || 'Plan not set' }} · Expires
-                {{ formatDate(subscription.expires_at) }}
-              </p>
-            </div>
-            <div class="data-row__aside">
-              <span :class="statusTone(subscription.status)">{{ subscription.status || 'unknown' }}</span>
-              <span class="data-row__meta">
-                {{ formatBytes(subscription.traffic_used_bytes) }} /
-                {{ formatBytes(subscription.traffic_total_bytes) }}
-              </span>
-            </div>
-          </li>
-        </ul>
-      </article>
+      <Card>
+        <CardHeader>
+          <CardTitle>套餐</CardTitle>
+          <p class="panel-card__meta">可用升级方案</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载套餐...</p>
+          <p v-else-if="plans.length === 0" class="panel-card__empty">暂无套餐。</p>
+          <ul v-else class="data-list">
+            <li v-for="plan in plans.slice(0, 5)" :key="plan.id" class="data-row">
+              <div>
+                <p class="data-row__title">{{ plan.name }}</p>
+                <p class="data-row__meta">
+                  {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} 天
+                </p>
+              </div>
+              <div class="data-row__aside">
+                <Badge variant="outline">{{ plan.tags?.[0] || '套餐' }}</Badge>
+                <span class="data-row__meta">{{ formatBytes(plan.traffic_limit_bytes) }}</span>
+              </div>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
 
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Plans</h3>
-            <p class="panel-card__meta">Available upgrades</p>
-          </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading plans...</div>
-        <div v-else-if="plans.length === 0" class="panel-card__empty">No plans available.</div>
-        <ul v-else class="data-list">
-          <li v-for="plan in plans.slice(0, 5)" :key="plan.id" class="data-row">
-            <div>
-              <p class="data-row__title">{{ plan.name }}</p>
-              <p class="data-row__meta">
-                {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} days
-              </p>
-            </div>
-            <div class="data-row__aside">
-              <span class="tag">{{ plan.tags?.[0] || 'Plan' }}</span>
-              <span class="data-row__meta">{{ formatBytes(plan.traffic_limit_bytes) }}</span>
-            </div>
-          </li>
-        </ul>
-      </article>
+      <Card>
+        <CardHeader>
+          <CardTitle>公告</CardTitle>
+          <p class="panel-card__meta">最新更新</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载公告...</p>
+          <p v-else-if="announcements.length === 0" class="panel-card__empty">
+            暂无公告。
+          </p>
+          <ul v-else class="data-list data-list--compact">
+            <li v-for="announcement in announcements" :key="announcement.id" class="data-row">
+              <div>
+                <p class="data-row__title">{{ announcement.title }}</p>
+                <p class="data-row__meta">
+                  {{ announcement.category || '综合' }} ·
+                  {{ formatDate(announcement.published_at || announcement.visible_from) }}
+                </p>
+              </div>
+              <Badge variant="secondary">{{ announcement.audience || '全体' }}</Badge>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
 
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Announcements</h3>
-            <p class="panel-card__meta">Latest updates</p>
-          </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading announcements...</div>
-        <div v-else-if="announcements.length === 0" class="panel-card__empty">
-          No announcements.
-        </div>
-        <ul v-else class="data-list data-list--compact">
-          <li v-for="announcement in announcements" :key="announcement.id" class="data-row">
-            <div>
-              <p class="data-row__title">{{ announcement.title }}</p>
-              <p class="data-row__meta">
-                {{ announcement.category || 'General' }} ·
-                {{ formatDate(announcement.published_at || announcement.visible_from) }}
-              </p>
-            </div>
-            <span class="tag">{{ announcement.audience || 'All users' }}</span>
-          </li>
-        </ul>
-      </article>
-
-      <article class="panel-card panel-card--full">
-        <header class="panel-card__header">
-          <div>
-            <h3>Orders</h3>
-            <p class="panel-card__meta">Recent activity</p>
-          </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading orders...</div>
-        <div v-else-if="orders.length === 0" class="panel-card__empty">No orders yet.</div>
-        <ul v-else class="data-list data-list--compact">
-          <li v-for="order in orders" :key="order.id" class="data-row">
-            <div>
-              <p class="data-row__title">
-                #{{ order.number }} · {{ formatCurrency(order.total_cents, order.currency) }}
-              </p>
-              <p class="data-row__meta">
-                {{ formatDateTime(order.updated_at || order.created_at) }}
-              </p>
-            </div>
-            <div class="data-row__aside">
-              <span :class="statusTone(order.status)">{{ order.status }}</span>
-              <span :class="statusTone(order.payment_status)">{{ order.payment_status }}</span>
-            </div>
-          </li>
-        </ul>
-      </article>
+      <Card class="panel-card--full">
+        <CardHeader>
+          <CardTitle>订单</CardTitle>
+          <p class="panel-card__meta">最近交易</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载订单...</p>
+          <p v-else-if="orders.length === 0" class="panel-card__empty">暂无订单。</p>
+          <ul v-else class="data-list data-list--compact">
+            <li v-for="order in orders" :key="order.id" class="data-row">
+              <div>
+                <p class="data-row__title">
+                  #{{ order.number }} · {{ formatCurrency(order.total_cents, order.currency) }}
+                </p>
+                <p class="data-row__meta">
+                  {{ formatDateTime(order.updated_at || order.created_at) }}
+                </p>
+              </div>
+              <div class="data-row__aside">
+                <Badge :variant="statusVariant(order.status)">{{ statusLabel(order.status) }}</Badge>
+                <Badge :variant="statusVariant(order.payment_status)">{{ statusLabel(order.payment_status) }}</Badge>
+              </div>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
     </div>
   </div>
 </template>
+
