@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ const orderError = ref('');
 const orderMessage = ref('');
 const orderLoading = ref(false);
 const orderResult = ref<CreateUserOrderResponse | null>(null);
+const orderFormRef = ref<HTMLElement | null>(null);
 
 const filters = reactive({
   q: '',
@@ -36,8 +37,6 @@ const orderForm = reactive({
   plan_id: 0,
   quantity: 1,
   payment_method: 'balance',
-  payment_channel: '',
-  payment_return_url: '',
 });
 
 const selectedPlan = computed(() => {
@@ -87,13 +86,11 @@ const priceShortcuts = [
 function applyPriceRange(min: number | null, max: number | null) {
   filters.minPrice = min;
   filters.maxPrice = max;
-  void loadPlans();
 }
 
 function clearPriceRange() {
   filters.minPrice = null;
   filters.maxPrice = null;
-  void loadPlans();
 }
 
 function getHighlightLabel(plan: UserPlanSummary): string | null {
@@ -164,6 +161,24 @@ function selectPlan(plan: UserPlanSummary) {
   orderError.value = '';
 }
 
+function selectPlanAndFocus(plan: UserPlanSummary) {
+  selectPlan(plan);
+  void nextTick(() => {
+    orderFormRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+function ensureSelectedPlan(list: UserPlanSummary[]) {
+  if (!list.length) {
+    orderForm.plan_id = 0;
+    return;
+  }
+  if (orderForm.plan_id && list.some((plan) => plan.id === orderForm.plan_id)) {
+    return;
+  }
+  orderForm.plan_id = list[0].id;
+}
+
 async function submitOrder() {
   orderError.value = '';
   orderMessage.value = '';
@@ -180,21 +195,11 @@ async function submitOrder() {
     orderForm.quantity = normalizedQuantity;
   }
 
-  if (orderForm.payment_method === 'external' && !orderForm.payment_channel) {
-    orderError.value = '使用外部支付时必须填写支付通道。';
-    orderLoading.value = false;
-    return;
-  }
-
   try {
     const response = await userApi.createUserOrder({
       plan_id: orderForm.plan_id,
       quantity: normalizedQuantity,
       payment_method: orderForm.payment_method,
-      payment_channel:
-        orderForm.payment_method === 'external' ? orderForm.payment_channel : undefined,
-      payment_return_url:
-        orderForm.payment_method === 'external' ? orderForm.payment_return_url : undefined,
       idempotency_key: createIdempotencyKey(),
     });
     orderResult.value = response;
@@ -209,6 +214,14 @@ async function submitOrder() {
 onMounted(() => {
   void loadPlans();
 });
+
+watch(
+  filteredPlans,
+  (list) => {
+    ensureSelectedPlan(list);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -280,91 +293,86 @@ onMounted(() => {
     </Alert>
 
     <div class="split-grid">
-      <Card>
-        <CardHeader>
-          <CardTitle>创建订单</CardTitle>
-          <p class="panel-card__meta">POST /user/orders</p>
-        </CardHeader>
-        <CardContent>
-          <form class="stack" @submit.prevent="submitOrder">
-            <div class="stack stack--tight">
-              <Label>套餐</Label>
-              <Select v-model.number="orderForm.plan_id">
-                <SelectTrigger>
-                  <SelectValue placeholder="选择套餐" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">请选择套餐</SelectItem>
-                  <SelectItem v-for="plan in filteredPlans" :key="plan.id" :value="plan.id">
-                    {{ plan.name }} · {{ formatCurrency(plan.price_cents, plan.currency) }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div v-if="selectedPlan" class="detail-grid">
-              <div>
-                <p class="detail-label">已选套餐</p>
-                <p class="detail-value">{{ selectedPlan.name }}</p>
+      <div ref="orderFormRef">
+        <Card>
+          <CardHeader>
+            <CardTitle>创建订单</CardTitle>
+            <p class="panel-card__meta">POST /user/orders</p>
+          </CardHeader>
+          <CardContent>
+            <form class="stack" @submit.prevent="submitOrder">
+              <div class="stack stack--tight">
+                <Label>套餐</Label>
+                <Select v-model.number="orderForm.plan_id">
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择套餐" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">请选择套餐</SelectItem>
+                    <SelectItem v-for="plan in filteredPlans" :key="plan.id" :value="plan.id">
+                      {{ plan.name }} · {{ formatCurrency(plan.price_cents, plan.currency) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p class="text-xs text-muted-foreground">也可以从右侧列表直接点击套餐。</p>
               </div>
-              <div v-if="getHighlightLabel(selectedPlan)">
-                <p class="detail-label">标签</p>
-                <p class="detail-value">{{ getHighlightLabel(selectedPlan) }}</p>
+              <div v-if="selectedPlan" class="detail-grid">
+                <div>
+                  <p class="detail-label">已选套餐</p>
+                  <p class="detail-value">{{ selectedPlan.name }}</p>
+                </div>
+                <div v-if="getHighlightLabel(selectedPlan)">
+                  <p class="detail-label">标签</p>
+                  <p class="detail-value">{{ getHighlightLabel(selectedPlan) }}</p>
+                </div>
+                <div>
+                  <p class="detail-label">单价</p>
+                  <p class="detail-value">
+                    {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="detail-label">总价</p>
+                  <p class="detail-value">
+                    {{ formatCurrency(totalCents ?? 0, selectedPlan.currency) }}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p class="detail-label">单价</p>
-                <p class="detail-value">
-                  {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
-                </p>
+              <p v-else class="panel-card__empty">请选择套餐以查看价格详情。</p>
+              <div class="stack stack--tight">
+                <Label>数量</Label>
+                <Input v-model.number="orderForm.quantity" type="number" min="1" />
               </div>
-              <div>
-                <p class="detail-label">总价</p>
-                <p class="detail-value">
-                  {{ formatCurrency(totalCents ?? 0, selectedPlan.currency) }}
-                </p>
+              <div class="stack stack--tight">
+                <Label>支付方式</Label>
+                <Select v-model="orderForm.payment_method">
+                  <SelectTrigger>
+                    <SelectValue placeholder="请选择" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="balance">余额</SelectItem>
+                    <SelectItem value="external">外部</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
-            <p v-else class="panel-card__empty">请选择套餐以查看价格详情。</p>
-            <div class="stack stack--tight">
-              <Label>数量</Label>
-              <Input v-model.number="orderForm.quantity" type="number" min="1" />
-            </div>
-            <div class="stack stack--tight">
-              <Label>支付方式</Label>
-              <Select v-model="orderForm.payment_method">
-                <SelectTrigger>
-                  <SelectValue placeholder="请选择" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="balance">余额</SelectItem>
-                  <SelectItem value="external">外部</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
-              <Label>支付通道</Label>
-              <Input v-model="orderForm.payment_channel" type="text" placeholder="例如 stripe" />
-            </div>
-            <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
-              <Label>回跳地址</Label>
-              <Input v-model="orderForm.payment_return_url" type="url" placeholder="https://example.com/return" />
-            </div>
-            <p v-if="orderForm.payment_method === 'external'" class="text-xs text-muted-foreground">
-              外部支付会创建待支付订单，可通过回跳地址完成跳转。
-            </p>
-            <Button type="submit" :disabled="orderLoading">
-              {{ orderLoading ? '提交中...' : '创建订单' }}
-            </Button>
-            <Alert v-if="orderMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
-              <AlertTitle>下单成功</AlertTitle>
-              <AlertDescription>{{ orderMessage }}</AlertDescription>
-            </Alert>
-            <Alert v-if="orderError" variant="destructive">
-              <AlertTitle>下单失败</AlertTitle>
-              <AlertDescription>{{ orderError }}</AlertDescription>
-            </Alert>
-          </form>
-        </CardContent>
-      </Card>
+              <p v-if="orderForm.payment_method === 'external'" class="text-xs text-muted-foreground">
+                外部支付会创建待支付订单，支付完成后自动跳转。
+              </p>
+              <Button type="submit" :disabled="orderLoading">
+                {{ orderLoading ? '提交中...' : '创建订单' }}
+              </Button>
+              <Alert v-if="orderMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+                <AlertTitle>下单成功</AlertTitle>
+                <AlertDescription>{{ orderMessage }}</AlertDescription>
+              </Alert>
+              <Alert v-if="orderError" variant="destructive">
+                <AlertTitle>下单失败</AlertTitle>
+                <AlertDescription>{{ orderError }}</AlertDescription>
+              </Alert>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
@@ -382,7 +390,7 @@ onMounted(() => {
               :key="plan.id"
               :class="['data-row', 'data-row--stack', { 'data-row--selected': orderForm.plan_id === plan.id }]"
             >
-              <div>
+              <div class="cursor-pointer" @click="selectPlanAndFocus(plan)">
                 <p class="data-row__title">{{ plan.name }}</p>
                 <p class="data-row__meta">
                   {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} 天
@@ -398,7 +406,12 @@ onMounted(() => {
                 </div>
               </div>
               <div class="data-row__aside">
-                <Button variant="ghost" size="sm" type="button" @click="selectPlan(plan)">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  @click="selectPlanAndFocus(plan)"
+                >
                   选择
                 </Button>
               </div>
@@ -443,5 +456,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-
-

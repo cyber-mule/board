@@ -974,7 +974,7 @@ a:hover {
 
 .split-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
 }
 
@@ -1035,6 +1035,10 @@ td[data-slot="table-cell"] {
 
   .page-section__header {
     flex-direction: column;
+  }
+
+  .split-grid {
+    grid-template-columns: 1fr;
   }
 
   .panel-card--full {

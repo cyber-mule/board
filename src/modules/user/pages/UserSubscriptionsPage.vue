@@ -58,6 +58,7 @@ const pagination = ref<PaginationMeta | null>(null);
 const jumpPage = ref('');
 const route = useRoute();
 const router = useRouter();
+const selectedSubscriptionId = ref<number | null>(null);
 
 const filters = reactive({
   q: '',
@@ -98,6 +99,13 @@ const compare = ref<{
   current: UserSubscriptionPreview;
   selected: UserSubscriptionPreview;
 } | null>(null);
+const selectedSubscription = computed(() => {
+  return (
+    subscriptions.value.find(
+      (subscription) => subscription.id === selectedSubscriptionId.value,
+    ) ?? null
+  );
+});
 
 const isPreviewReady = computed(() => preview.value !== null && !previewLoading.value);
 const maxDiffLines = 200;
@@ -502,6 +510,24 @@ function statusLabel(value?: string) {
   }
 }
 
+function ensureSelection(list: UserSubscriptionSummary[]) {
+  if (!list.length) {
+    selectedSubscriptionId.value = null;
+    return;
+  }
+  if (
+    selectedSubscriptionId.value &&
+    list.some((subscription) => subscription.id === selectedSubscriptionId.value)
+  ) {
+    return;
+  }
+  selectedSubscriptionId.value = list[0].id;
+}
+
+function selectSubscription(subscription: UserSubscriptionSummary) {
+  selectedSubscriptionId.value = subscription.id;
+}
+
 function buildTemplateSelections(items: UserSubscriptionSummary[]) {
   const selections: Record<number, number> = { ...templateSelections.value };
   items.forEach((subscription) => {
@@ -553,6 +579,7 @@ async function loadSubscriptions(targetPage = 1, options: LoadOptions = {}) {
     buildTemplateSelections(subscriptions.value);
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
+    ensureSelection(subscriptions.value);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载订阅失败';
   } finally {
@@ -584,6 +611,7 @@ async function loadMore() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
     updateQuery(page.value, 'replace');
+    ensureSelection(subscriptions.value);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载更多订阅失败';
   } finally {
@@ -823,6 +851,17 @@ onBeforeUnmount(() => {
     window.clearTimeout(filterSyncTimer);
   }
 });
+
+watch(selectedSubscriptionId, () => {
+  preview.value = null;
+  previewTargetId.value = null;
+  previewError.value = '';
+  previewActionError.value = '';
+  previewActionMessage.value = '';
+  compare.value = null;
+  compareError.value = '';
+  compareMessage.value = '';
+});
 </script>
 
 <template>
@@ -917,8 +956,16 @@ onBeforeUnmount(() => {
           当前筛选条件下暂无订阅。
         </p>
         <ul v-else class="data-list">
-          <li v-for="subscription in subscriptions" :key="subscription.id" class="data-row data-row--stack">
-            <div>
+          <li
+            v-for="subscription in subscriptions"
+            :key="subscription.id"
+            :class="[
+              'data-row',
+              'data-row--stack',
+              { 'data-row--selected': subscription.id === selectedSubscriptionId },
+            ]"
+          >
+            <div class="cursor-pointer" @click="selectSubscription(subscription)">
               <p class="data-row__title">{{ subscription.name }}</p>
               <p class="data-row__meta">
                 {{ subscription.plan_name || '未绑定套餐' }} · 到期 {{ formatDate(subscription.expires_at) }}
@@ -1005,6 +1052,90 @@ onBeforeUnmount(() => {
               :disabled="isLoadingMore || !pagination.has_next"
             >
               {{ isLoadingMore ? '加载中...' : '加载更多' }}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>订阅详情</CardTitle>
+        <p class="panel-card__meta">
+          {{ selectedSubscription ? `订阅 #${selectedSubscription.id}` : '请选择订阅' }}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <p v-if="loading" class="panel-card__empty">正在加载订阅...</p>
+        <p v-else-if="!selectedSubscription" class="panel-card__empty">请选择订阅查看详情。</p>
+        <div v-else class="stack">
+          <div class="cluster">
+            <Badge :variant="statusVariant(selectedSubscription.status)">
+              {{ statusLabel(selectedSubscription.status) }}
+            </Badge>
+            <Badge variant="secondary">{{ selectedSubscription.plan_name || '未绑定套餐' }}</Badge>
+          </div>
+          <div class="detail-grid">
+            <div>
+              <p class="detail-label">到期时间</p>
+              <p class="detail-value">{{ formatDate(selectedSubscription.expires_at) }}</p>
+            </div>
+            <div>
+              <p class="detail-label">最近刷新</p>
+              <p class="detail-value">{{ formatDateTime(selectedSubscription.last_refreshed_at) }}</p>
+            </div>
+            <div>
+              <p class="detail-label">设备上限</p>
+              <p class="detail-value">{{ selectedSubscription.devices_limit ?? '-' }}</p>
+            </div>
+            <div>
+              <p class="detail-label">流量</p>
+              <p class="detail-value">
+                {{ formatBytes(selectedSubscription.traffic_used_bytes) }} /
+                {{ formatBytes(selectedSubscription.traffic_total_bytes) }}
+              </p>
+            </div>
+            <div>
+              <p class="detail-label">当前模板</p>
+              <p class="detail-value">#{{ selectedSubscription.template_id ?? '-' }}</p>
+            </div>
+            <div>
+              <p class="detail-label">已选模板</p>
+              <p class="detail-value">
+                #{{ templateSelections[selectedSubscription.id] ?? selectedSubscription.template_id ?? '-' }}
+              </p>
+            </div>
+          </div>
+          <div class="cluster cluster--center">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              @click="handlePreview(selectedSubscription)"
+              :disabled="previewLoading"
+            >
+              生成预览
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              @click="handleCompare(selectedSubscription)"
+              :disabled="compareLoading"
+            >
+              比较模板
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              :disabled="
+                applyLoading ||
+                !selectedSubscription.available_template_ids?.length ||
+                (templateSelections[selectedSubscription.id] ?? selectedSubscription.template_id) === selectedSubscription.template_id
+              "
+              @click="openConfirm(selectedSubscription)"
+            >
+              应用模板
             </Button>
           </div>
         </div>
@@ -1238,4 +1369,3 @@ onBeforeUnmount(() => {
     </Dialog>
   </div>
 </template>
-

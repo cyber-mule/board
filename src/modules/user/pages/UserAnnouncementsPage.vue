@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import type { UserAnnouncementSummary } from '../../../api/types';
 const announcements = ref<UserAnnouncementSummary[]>([]);
 const loading = ref(true);
 const errorMessage = ref('');
+const selectedAnnouncementId = ref<number | null>(null);
 
 const filters = reactive({
   audience: '',
@@ -31,6 +32,13 @@ const filters = reactive({
 const filteredAnnouncements = computed(() => {
   const keyword = filters.keyword.trim().toLowerCase();
   const list = announcements.value.filter((announcement) => {
+    const audience = filters.audience;
+    if (audience && audience !== '__all__') {
+      const announcementAudience = announcement.audience || 'all';
+      if (announcementAudience !== 'all' && announcementAudience !== audience) {
+        return false;
+      }
+    }
     const category = filters.category;
     if (category && category !== '__all__' && announcement.category !== category) {
       return false;
@@ -69,6 +77,29 @@ const availableCategories = computed(() => {
   return Array.from(categories);
 });
 
+const selectedAnnouncement = computed(() => {
+  return (
+    filteredAnnouncements.value.find(
+      (announcement) => announcement.id === selectedAnnouncementId.value,
+    ) ?? null
+  );
+});
+
+function ensureSelection(list: UserAnnouncementSummary[]) {
+  if (!list.length) {
+    selectedAnnouncementId.value = null;
+    return;
+  }
+  if (selectedAnnouncementId.value && list.some((item) => item.id === selectedAnnouncementId.value)) {
+    return;
+  }
+  selectedAnnouncementId.value = list[0].id;
+}
+
+function selectAnnouncement(announcement: UserAnnouncementSummary) {
+  selectedAnnouncementId.value = announcement.id;
+}
+
 async function loadAnnouncements() {
   loading.value = true;
   errorMessage.value = '';
@@ -91,6 +122,14 @@ async function loadAnnouncements() {
 onMounted(() => {
   void loadAnnouncements();
 });
+
+watch(
+  filteredAnnouncements,
+  (list) => {
+    ensureSelection(list);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -164,38 +203,90 @@ onMounted(() => {
       <AlertDescription>{{ errorMessage }}</AlertDescription>
     </Alert>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>公告列表</CardTitle>
-        <p class="panel-card__meta">最新 {{ filters.limit }} 条</p>
-      </CardHeader>
-      <CardContent>
-        <p v-if="loading" class="panel-card__empty">正在加载公告...</p>
-        <p v-else-if="filteredAnnouncements.length === 0" class="panel-card__empty">
-          暂无公告。
-        </p>
-        <ul v-else class="data-list">
-          <li
-            v-for="announcement in filteredAnnouncements"
-            :key="announcement.id"
-            :class="['data-row', 'data-row--stack', { 'data-row--pinned': announcement.is_pinned }]"
-          >
-            <div>
-              <p class="data-row__title">{{ announcement.title }}</p>
-              <p class="data-row__meta">
-                {{ announcement.category || '综合' }} ·
-                {{ formatDateTime(announcement.published_at || announcement.visible_from) }}
-              </p>
+    <div class="split-grid">
+      <Card>
+        <CardHeader>
+          <CardTitle>公告列表</CardTitle>
+          <p class="panel-card__meta">最新 {{ filters.limit }} 条</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载公告...</p>
+          <p v-else-if="filteredAnnouncements.length === 0" class="panel-card__empty">
+            暂无公告。
+          </p>
+          <ul v-else class="data-list">
+            <li
+              v-for="announcement in filteredAnnouncements"
+              :key="announcement.id"
+              :class="[
+                'data-row',
+                'data-row--stack',
+                {
+                  'data-row--pinned': announcement.is_pinned,
+                  'data-row--selected': announcement.id === selectedAnnouncementId,
+                },
+              ]"
+              @click="selectAnnouncement(announcement)"
+            >
+              <div>
+                <p class="data-row__title">{{ announcement.title }}</p>
+                <p class="data-row__meta">
+                  {{ announcement.category || '综合' }} ·
+                  {{ formatDateTime(announcement.published_at || announcement.visible_from) }}
+                </p>
+              </div>
+              <div class="data-row__aside">
+                <Badge variant="secondary">{{ announcement.audience || '全体' }}</Badge>
+                <span class="data-row__meta">{{ announcement.is_pinned ? '置顶' : '常规' }}</span>
+                <Badge v-if="announcement.is_pinned" variant="default">置顶</Badge>
+              </div>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>公告详情</CardTitle>
+          <p class="panel-card__meta">
+            {{ selectedAnnouncement ? selectedAnnouncement.title : '请选择公告' }}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载公告...</p>
+          <p v-else-if="!selectedAnnouncement" class="panel-card__empty">
+            请选择公告查看详情。
+          </p>
+          <div v-else class="stack">
+            <div class="cluster">
+              <Badge variant="secondary">{{ selectedAnnouncement.category || '综合' }}</Badge>
+              <Badge variant="outline">{{ selectedAnnouncement.audience || '全体' }}</Badge>
+              <Badge v-if="selectedAnnouncement.is_pinned" variant="default">置顶</Badge>
             </div>
-            <div class="data-row__aside">
-              <Badge variant="secondary">{{ announcement.audience || '全体' }}</Badge>
-              <span class="data-row__meta">{{ announcement.is_pinned ? '置顶' : '常规' }}</span>
-              <Badge v-if="announcement.is_pinned" variant="default">置顶</Badge>
+            <div class="detail-grid">
+              <div>
+                <p class="detail-label">发布时间</p>
+                <p class="detail-value">
+                  {{ formatDateTime(selectedAnnouncement.published_at || selectedAnnouncement.visible_from) }}
+                </p>
+              </div>
+              <div>
+                <p class="detail-label">有效期</p>
+                <p class="detail-value">
+                  {{ selectedAnnouncement.visible_to ? formatDateTime(selectedAnnouncement.visible_to) : '长期' }}
+                </p>
+              </div>
+              <div>
+                <p class="detail-label">优先级</p>
+                <p class="detail-value">{{ selectedAnnouncement.priority ?? '-' }}</p>
+              </div>
             </div>
-          </li>
-        </ul>
-      </CardContent>
-    </Card>
+            <div class="preview__content">
+              {{ selectedAnnouncement.content || '暂无公告内容。' }}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 </template>
-

@@ -247,6 +247,18 @@ const isPendingDetail = computed(() => {
   return status === 'pending_payment' || payment === 'pending';
 });
 
+function ensureSelection(list: OrderDetail[]) {
+  if (!list.length) {
+    selectedOrderId.value = null;
+    detail.value = null;
+    return;
+  }
+  if (selectedOrderId.value && list.some((order) => order.id === selectedOrderId.value)) {
+    return;
+  }
+  void openDetails(list[0], false);
+}
+
 function statusVariant(value?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (value) {
     case 'paid':
@@ -327,6 +339,7 @@ async function loadOrders(
     orders.value = response.orders ?? [];
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
+    ensureSelection(orders.value);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载订单失败';
   } finally {
@@ -365,6 +378,7 @@ async function loadMore() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
     updateQuery(page.value, 'replace');
+    ensureSelection(orders.value);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载更多订单失败';
   } finally {
@@ -674,7 +688,7 @@ onBeforeUnmount(() => {
             :key="order.id"
             :class="['data-row', 'data-row--stack', { 'data-row--selected': order.id === selectedOrderId }]"
           >
-            <div>
+            <div class="cursor-pointer" @click="openDetails(order, true)">
               <p class="data-row__title">
                 #{{ order.number }} · {{ formatCurrency(order.total_cents, order.currency) }}
               </p>
@@ -879,4 +893,3 @@ onBeforeUnmount(() => {
     </Card>
   </div>
 </template>
-
