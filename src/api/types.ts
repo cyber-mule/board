@@ -52,6 +52,12 @@ export type NodeKernelSummary = {
   last_synced_at?: number;
 };
 
+export type SyncNodeKernelsResponse = {
+  node_id: number;
+  synced_count: number;
+  kernels: NodeKernelSummary[];
+};
+
 export type PlanSummary = {
   id: number;
   name: string;
@@ -71,6 +77,38 @@ export type PlanSummary = {
   updated_at?: number;
 };
 
+export type CreatePlanRequest = {
+  name: string;
+  slug?: string;
+  description?: string;
+  tags?: string[];
+  features?: string[];
+  price_cents: number;
+  currency: string;
+  duration_days: number;
+  traffic_limit_bytes?: number;
+  devices_limit?: number;
+  sort_order?: number;
+  status?: string;
+  visible?: boolean;
+};
+
+export type UpdatePlanRequest = {
+  name?: string;
+  slug?: string;
+  description?: string;
+  tags?: string[];
+  features?: string[];
+  price_cents?: number;
+  currency?: string;
+  duration_days?: number;
+  traffic_limit_bytes?: number;
+  devices_limit?: number;
+  sort_order?: number;
+  status?: string;
+  visible?: boolean;
+};
+
 export type AnnouncementSummary = {
   id: number;
   title: string;
@@ -88,6 +126,94 @@ export type AnnouncementSummary = {
   updated_by?: string;
   created_at?: number;
   updated_at?: number;
+};
+
+export type CreateAnnouncementRequest = {
+  title: string;
+  content: string;
+  category?: string;
+  audience?: string;
+  is_pinned?: boolean;
+  priority?: number;
+  created_by?: string;
+};
+
+export type UpdateAnnouncementRequest = {
+  title?: string;
+  content?: string;
+  category?: string;
+  audience?: string;
+  is_pinned?: boolean;
+  priority?: number;
+};
+
+export type PublishAnnouncementRequest = {
+  visible_to?: number;
+  operator?: string;
+};
+
+export type TemplateVariable = {
+  value_type: string;
+  required: boolean;
+  description?: string;
+  default_value?: unknown;
+};
+
+export type SubscriptionTemplateSummary = {
+  id: number;
+  name: string;
+  description?: string;
+  client_type: string;
+  format: string;
+  content?: string;
+  variables?: Record<string, TemplateVariable>;
+  is_default: boolean;
+  version: number;
+  updated_at: number;
+  published_at?: number;
+  last_published_by?: string;
+};
+
+export type SubscriptionTemplateHistoryEntry = {
+  version: number;
+  changelog?: string;
+  published_at: number;
+  published_by: string;
+  variables?: Record<string, TemplateVariable>;
+};
+
+export type CreateTemplateRequest = {
+  name: string;
+  description?: string;
+  client_type: string;
+  format: string;
+  content: string;
+  variables?: Record<string, TemplateVariable>;
+  is_default?: boolean;
+};
+
+export type UpdateTemplateRequest = {
+  name?: string;
+  description?: string;
+  format?: string;
+  content?: string;
+  variables?: Record<string, TemplateVariable>;
+  is_default?: boolean;
+};
+
+export type PublishTemplateRequest = {
+  changelog?: string;
+  operator?: string;
+};
+
+export type PublishTemplateResponse = {
+  template: SubscriptionTemplateSummary;
+  history: SubscriptionTemplateHistoryEntry;
+};
+
+export type TemplateHistoryResponse = {
+  template_id: number;
+  history: SubscriptionTemplateHistoryEntry[];
 };
 
 export type OrderItem = {
@@ -168,6 +294,53 @@ export type AdminOrderDetail = OrderDetail & {
 
 export type AdminOrderDetailResponse = {
   order: AdminOrderDetail;
+};
+
+export type PayOrderRequest = {
+  payment_method?: string;
+  paid_at?: number;
+  note?: string;
+  reference?: string;
+  charge_balance?: boolean;
+};
+
+export type CancelOrderRequest = {
+  reason?: string;
+  cancelled_at?: number;
+};
+
+export type RefundOrderRequest = {
+  amount_cents: number;
+  reason?: string;
+  operator?: string;
+};
+
+export type RefundOrderResponse = {
+  order: AdminOrderDetail;
+  refund: OrderRefund;
+};
+
+export type SecuritySetting = {
+  id: number;
+  third_party_api_enabled: boolean;
+  api_key?: string;
+  api_secret?: string;
+  encryption_algorithm?: string;
+  nonce_ttl_seconds?: number;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type UpdateSecuritySettingsRequest = {
+  third_party_api_enabled?: boolean;
+  api_key?: string;
+  api_secret?: string;
+  encryption_algorithm?: string;
+  nonce_ttl_seconds?: number;
+};
+
+export type SecuritySettingsResponse = {
+  setting: SecuritySetting;
 };
 
 export type UserSubscriptionSummary = {

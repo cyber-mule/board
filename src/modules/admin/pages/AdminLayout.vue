@@ -26,7 +26,10 @@ function handleLogout() {
     <nav class="subnav">
       <RouterLink to="/admin" class="subnav__link">Overview</RouterLink>
       <RouterLink to="/admin/nodes" class="subnav__link">Nodes</RouterLink>
+      <RouterLink to="/admin/templates" class="subnav__link">Templates</RouterLink>
       <RouterLink to="/admin/plans" class="subnav__link">Plans</RouterLink>
+      <RouterLink to="/admin/announcements" class="subnav__link">Announcements</RouterLink>
+      <RouterLink to="/admin/security" class="subnav__link">Security</RouterLink>
       <RouterLink to="/admin/orders" class="subnav__link">Orders</RouterLink>
     </nav>
 

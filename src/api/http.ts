@@ -3,6 +3,7 @@ import { clearSession, getAccessToken } from '../auth/tokens';
 import { refreshTokens } from './auth';
 import { buildUrl } from './url';
 import { ensureLeadingSlash } from '../utils/path';
+import { USE_MOCK, mockFetch } from '../mock';
 
 type RequestOptions = {
   method?: string;
@@ -57,6 +58,23 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
+  }
+
+  // Use mock API if enabled
+  if (USE_MOCK) {
+    const mockUrl = buildUrl(path);
+    const response = await mockFetch(mockUrl, {
+      method: options.method ?? 'GET',
+      headers,
+      body: payload ?? undefined,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Request failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+    }
+
+    return handleResponse<T>(response);
   }
 
   const response = await fetch(buildUrl(path), {

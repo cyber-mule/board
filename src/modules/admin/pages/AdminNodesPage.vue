@@ -13,6 +13,8 @@ const selectedNode = ref<NodeSummary | null>(null);
 const kernels = ref<NodeKernelSummary[]>([]);
 const kernelsLoading = ref(false);
 const kernelsError = ref('');
+const syncingKernels = ref(false);
+const syncSuccess = ref(false);
 
 const perPage = 10;
 const page = ref(1);
@@ -100,6 +102,7 @@ async function selectNode(node: NodeSummary) {
   kernels.value = [];
   kernelsLoading.value = true;
   kernelsError.value = '';
+  syncSuccess.value = false;
 
   try {
     const response = await adminApi.fetchAdminNodeKernels(node.id);
@@ -108,6 +111,37 @@ async function selectNode(node: NodeSummary) {
     kernelsError.value = error instanceof Error ? error.message : 'Failed to load kernels';
   } finally {
     kernelsLoading.value = false;
+  }
+}
+
+async function syncKernels() {
+  if (!selectedNode.value || syncingKernels.value) {
+    return;
+  }
+
+  syncingKernels.value = true;
+  kernelsError.value = '';
+  syncSuccess.value = false;
+
+  try {
+    const response = await adminApi.syncNodeKernels(selectedNode.value.id);
+    kernels.value = response.kernels ?? [];
+    syncSuccess.value = true;
+    
+    // Update the node's last_synced_at in the list
+    const nodeIndex = nodes.value.findIndex(n => n.id === selectedNode.value?.id);
+    if (nodeIndex !== -1) {
+      nodes.value[nodeIndex].last_synced_at = Math.floor(Date.now() / 1000);
+    }
+
+    // Hide success message after 3 seconds
+    setTimeout(() => {
+      syncSuccess.value = false;
+    }, 3000);
+  } catch (error) {
+    kernelsError.value = error instanceof Error ? error.message : 'Failed to sync kernels';
+  } finally {
+    syncingKernels.value = false;
   }
 }
 
@@ -218,6 +252,16 @@ onMounted(() => {
               {{ selectedNode ? selectedNode.name : 'Select a node' }}
             </p>
           </div>
+          <div v-if="selectedNode" class="page-section__actions">
+            <button 
+              class="button button--primary" 
+              type="button" 
+              @click="syncKernels" 
+              :disabled="syncingKernels"
+            >
+              {{ syncingKernels ? 'Syncing...' : 'Sync Kernels' }}
+            </button>
+          </div>
         </header>
         <div v-if="!selectedNode" class="panel-card__empty">Choose a node to view details.</div>
         <div v-else>
@@ -252,7 +296,12 @@ onMounted(() => {
 
           <div class="detail-section">
             <h4>Kernel status</h4>
-            <div v-if="kernelsLoading" class="panel-card__empty">Loading kernels...</div>
+            <p v-if="syncSuccess" class="alert alert--success" style="margin-bottom: 1rem;">
+              ✅ Kernels synced successfully!
+            </p>
+            <div v-if="kernelsLoading || syncingKernels" class="panel-card__empty">
+              {{ syncingKernels ? 'Syncing kernels...' : 'Loading kernels...' }}
+            </div>
             <div v-else-if="kernelsError" class="panel-card__empty">{{ kernelsError }}</div>
             <div v-else-if="kernels.length === 0" class="panel-card__empty">No kernels found.</div>
             <ul v-else class="data-list data-list--compact">

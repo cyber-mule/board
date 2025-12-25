@@ -6,6 +6,9 @@ import AdminDashboard from '../modules/admin/pages/AdminDashboard.vue';
 import AdminNodesPage from '../modules/admin/pages/AdminNodesPage.vue';
 import AdminOrdersPage from '../modules/admin/pages/AdminOrdersPage.vue';
 import AdminPlansPage from '../modules/admin/pages/AdminPlansPage.vue';
+import AdminTemplatesPage from '../modules/admin/pages/AdminTemplatesPage.vue';
+import AdminAnnouncementsPage from '../modules/admin/pages/AdminAnnouncementsPage.vue';
+import AdminSecurityPage from '../modules/admin/pages/AdminSecurityPage.vue';
 import UserLayout from '../modules/user/pages/UserLayout.vue';
 import UserDashboard from '../modules/user/pages/UserDashboard.vue';
 import UserAnnouncementsPage from '../modules/user/pages/UserAnnouncementsPage.vue';
@@ -24,7 +27,10 @@ const routes = [
     children: [
       { path: '', name: 'admin', component: AdminDashboard },
       { path: 'nodes', name: 'admin-nodes', component: AdminNodesPage },
+      { path: 'templates', name: 'admin-templates', component: AdminTemplatesPage },
       { path: 'plans', name: 'admin-plans', component: AdminPlansPage },
+      { path: 'announcements', name: 'admin-announcements', component: AdminAnnouncementsPage },
+      { path: 'security', name: 'admin-security', component: AdminSecurityPage },
       { path: 'orders', name: 'admin-orders', component: AdminOrdersPage },
     ],
   },
