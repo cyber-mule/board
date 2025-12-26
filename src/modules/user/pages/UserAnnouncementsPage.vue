@@ -281,9 +281,12 @@ watch(
                 <p class="detail-value">{{ selectedAnnouncement.priority ?? '-' }}</p>
               </div>
             </div>
-            <div class="preview__content">
-              {{ selectedAnnouncement.content || '暂无公告内容。' }}
-            </div>
+            <div
+              v-if="selectedAnnouncement.content"
+              class="preview__content"
+              v-html="selectedAnnouncement.content"
+            />
+            <div v-else class="preview__content">暂无公告内容。</div>
           </div>
         </CardContent>
       </Card>
