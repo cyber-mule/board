@@ -13,6 +13,7 @@ import {
   mockAnnouncements,
   mockNodes,
   mockTemplates,
+  mockPaymentChannels,
   mockSecuritySettings,
   currentUser,
   setCurrentUser,
@@ -32,7 +33,11 @@ import type {
   Node,
   SubscriptionTemplateSummary,
   AdminOrderDetail,
+  AdminUserSummary,
+  AdminSubscriptionSummary,
   SecuritySetting,
+  CreateAdminUserRequest,
+  CreateAdminSubscriptionRequest,
   CreatePlanRequest,
   UpdatePlanRequest,
   CreateAnnouncementRequest,
@@ -41,9 +46,17 @@ import type {
   CreateTemplateRequest,
   UpdateTemplateRequest,
   PublishTemplateRequest,
+  CreatePaymentChannelRequest,
+  UpdatePaymentChannelRequest,
+  PaymentChannelSummary,
   PayOrderRequest,
   CancelOrderRequest,
+  ExtendAdminSubscriptionRequest,
+  ResetUserPasswordRequest,
   UpdateSecuritySettingsRequest,
+  UpdateAdminSubscriptionRequest,
+  UpdateUserRolesRequest,
+  UpdateUserStatusRequest,
 } from '../api/types';
 
 // Simulate network delay
@@ -153,28 +166,121 @@ function normalizeTemplate(template: SubscriptionTemplateSummary): SubscriptionT
   };
 }
 
+type AdminUserSource = {
+  id: number;
+  email: string;
+  display_name: string;
+  role?: string;
+  roles?: string[];
+  status?: string;
+  email_verified_at?: number;
+  failed_login_attempts?: number;
+  locked_until?: number;
+  last_login_at?: number;
+  created_at: number;
+  updated_at: number;
+};
+
+function normalizeAdminUser(user: AdminUserSource): AdminUserSummary {
+  const roles = user.roles ?? (user.role ? [user.role] : []);
+
+  return {
+    id: user.id,
+    email: user.email,
+    display_name: user.display_name,
+    roles,
+    status: user.status ?? 'active',
+    email_verified_at: user.email_verified_at,
+    failed_login_attempts: user.failed_login_attempts ?? 0,
+    locked_until: user.locked_until,
+    last_login_at: user.last_login_at,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
+}
+
 function buildSubscriptionSummary(subscription: UserSubscription) {
   const subscriptionValue = subscription as UserSubscription & {
     device_limit?: number;
     devices_limit?: number;
     template_id?: number;
+    name?: string;
+    plan_name?: string;
+    available_template_ids?: number[];
+    token?: string;
+    subscribe_url?: string;
+    subscription_url?: string;
+    traffic_total_bytes?: number;
   };
   const plan = subscriptionValue.plan ?? mockPlans.find((item) => item.id === subscriptionValue.plan_id);
   const templateIds = mockTemplates.map((template) => template.id);
-  const templateId = subscriptionValue.template_id ?? templateIds[0];
+  const resolvedTemplateIds = subscriptionValue.available_template_ids ?? templateIds;
+  const templateId = subscriptionValue.template_id ?? resolvedTemplateIds[0];
 
   return {
     id: subscriptionValue.id,
-    name: plan?.name ?? `Subscription ${subscription.id}`,
-    plan_name: plan?.name,
+    name: subscriptionValue.name ?? plan?.name ?? `Subscription ${subscription.id}`,
+    plan_name: subscriptionValue.plan_name ?? plan?.name,
     status: subscriptionValue.status,
     template_id: templateId,
-    available_template_ids: templateIds,
+    available_template_ids: resolvedTemplateIds,
+    token: subscriptionValue.token,
+    subscription_url: subscriptionValue.subscription_url,
+    subscribe_url: subscriptionValue.subscribe_url,
     expires_at: subscriptionValue.expires_at,
-    traffic_total_bytes: subscriptionValue.traffic_limit_bytes,
+    traffic_total_bytes: subscriptionValue.traffic_total_bytes ?? subscriptionValue.traffic_limit_bytes,
     traffic_used_bytes: subscriptionValue.traffic_used_bytes,
     devices_limit: subscriptionValue.devices_limit ?? subscriptionValue.device_limit,
     last_refreshed_at: subscriptionValue.updated_at,
+  };
+}
+
+function buildAdminSubscriptionSummary(subscription: UserSubscription): AdminSubscriptionSummary {
+  const subscriptionValue = subscription as UserSubscription & {
+    device_limit?: number;
+    devices_limit?: number;
+    template_id?: number;
+    name?: string;
+    plan_name?: string;
+    available_template_ids?: number[];
+    token?: string;
+    subscribe_url?: string;
+    subscription_url?: string;
+    traffic_total_bytes?: number;
+  };
+  const plan = subscriptionValue.plan ?? mockPlans.find((item) => item.id === subscriptionValue.plan_id);
+  const templateIds = mockTemplates.map((template) => template.id);
+  const resolvedTemplateIds = subscriptionValue.available_template_ids ?? templateIds;
+  const templateId = subscriptionValue.template_id ?? resolvedTemplateIds[0];
+  const targetUser = mockUsers.find((user) => user.id === subscriptionValue.user_id);
+  const token =
+    subscriptionValue.token ??
+    subscriptionValue.subscribe_url?.split('/').filter(Boolean).slice(-1)[0];
+
+  return {
+    id: subscriptionValue.id,
+    user: targetUser
+      ? {
+          id: targetUser.id,
+          email: targetUser.email,
+          display_name: targetUser.display_name,
+        }
+      : undefined,
+    name: subscriptionValue.name ?? plan?.name ?? `Subscription ${subscription.id}`,
+    plan_name: subscriptionValue.plan_name ?? plan?.name ?? '-',
+    status: subscriptionValue.status,
+    template_id: templateId,
+    available_template_ids: resolvedTemplateIds,
+    token,
+    subscription_url: subscriptionValue.subscription_url,
+    subscribe_url: subscriptionValue.subscribe_url,
+    expires_at: subscriptionValue.expires_at,
+    traffic_total_bytes: subscriptionValue.traffic_total_bytes ?? subscriptionValue.traffic_limit_bytes,
+    traffic_used_bytes: subscriptionValue.traffic_used_bytes,
+    devices_limit: subscriptionValue.devices_limit ?? subscriptionValue.device_limit,
+    last_refreshed_at: subscriptionValue.updated_at,
+    created_at: subscriptionValue.created_at,
+    updated_at: subscriptionValue.updated_at,
   };
 }
 
@@ -584,6 +690,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       return mockResponse({
         modules: [
           {
+            key: 'users',
+            name: 'Users',
+            description: 'Manage user accounts, roles, and status.',
+            route: '/admin/users',
+          },
+          {
             key: 'nodes',
             name: 'Nodes',
             description: 'Monitor node health and kernel sync status.',
@@ -608,10 +720,22 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             route: '/admin/announcements',
           },
           {
+            key: 'payment_channels',
+            name: 'Payment Channels',
+            description: 'Configure payment gateways and callback URLs.',
+            route: '/admin/payment-channels',
+          },
+          {
             key: 'templates',
             name: 'Subscription Templates',
             description: 'Manage subscription template configurations.',
             route: '/admin/templates',
+          },
+          {
+            key: 'subscriptions',
+            name: 'Subscriptions',
+            description: 'Manage active subscriptions and lifecycle actions.',
+            route: '/admin/subscriptions',
           },
           {
             key: 'security',
@@ -620,6 +744,288 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             route: '/admin/security',
           },
         ],
+      });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const status = query?.get('status')?.trim();
+      const role = query?.get('role')?.trim();
+
+      let list = mockUsers.map(normalizeAdminUser);
+
+      if (q) {
+        list = list.filter((user) => {
+          const email = user.email.toLowerCase();
+          const name = user.display_name.toLowerCase();
+          return email.includes(q) || name.includes(q);
+        });
+      }
+      if (status) {
+        list = list.filter((user) => user.status === status);
+      }
+      if (role) {
+        list = list.filter((user) => user.roles?.includes(role));
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({
+        users: data,
+        pagination,
+      });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateAdminUserRequest;
+      const exists = mockUsers.some((user) => user.email === data.email);
+      if (exists) {
+        return mockError('Email already exists', 400);
+      }
+
+      const roles = data.roles && data.roles.length ? data.roles : ['user'];
+      const displayName = data.display_name || data.email.split('@')[0];
+      const createdAt = Date.now();
+
+      const newUser = {
+        id: generateId(),
+        email: data.email,
+        display_name: displayName,
+        role: roles[0],
+        roles,
+        status: data.status ?? 'active',
+        balance_cents: 0,
+        email_verified_at: data.email_verified ? createdAt : undefined,
+        failed_login_attempts: 0,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+
+      mockUsers.push(newUser);
+      return mockResponse({ user: normalizeAdminUser(newUser) }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/status`)) {
+    if (method === 'PATCH') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/status`);
+      const userIndex = mockUsers.findIndex((user) => user.id === id);
+      if (userIndex === -1) return mockError('User not found', 404);
+
+      const data = body as UpdateUserStatusRequest;
+      mockUsers[userIndex] = {
+        ...mockUsers[userIndex],
+        status: data.status,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ user: normalizeAdminUser(mockUsers[userIndex]) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/roles`)) {
+    if (method === 'PATCH') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/roles`);
+      const userIndex = mockUsers.findIndex((user) => user.id === id);
+      if (userIndex === -1) return mockError('User not found', 404);
+
+      const data = body as UpdateUserRolesRequest;
+      const roles = data.roles ?? [];
+      mockUsers[userIndex] = {
+        ...mockUsers[userIndex],
+        roles,
+        role: roles[0] ?? mockUsers[userIndex].role,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ user: normalizeAdminUser(mockUsers[userIndex]) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/reset-password`)) {
+    if (method === 'POST') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/reset-password`);
+      const user = mockUsers.find((item) => item.id === id);
+      if (!user) return mockError('User not found', 404);
+
+      const data = body as ResetUserPasswordRequest;
+      if (!data.password) return mockError('Password required', 400);
+
+      return mockResponse({ message: 'Password reset' });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/force-logout`)) {
+    if (method === 'POST') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/force-logout`);
+      const user = mockUsers.find((item) => item.id === id);
+      if (!user) return mockError('User not found', 404);
+
+      return mockResponse({ message: 'User logged out' });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const status = query?.get('status')?.trim();
+      const userId = Number(query?.get('user_id') ?? '');
+      const planName = query?.get('plan_name')?.trim().toLowerCase();
+      const templateId = Number(query?.get('template_id') ?? '');
+
+      let list = mockSubscriptions.map(buildAdminSubscriptionSummary);
+
+      if (q) {
+        list = list.filter((subscription) => {
+          const name = subscription.name.toLowerCase();
+          const token = subscription.token?.toLowerCase() ?? '';
+          return name.includes(q) || token.includes(q);
+        });
+      }
+      if (status) {
+        list = list.filter((subscription) => subscription.status === status);
+      }
+      if (Number.isFinite(userId) && userId > 0) {
+        list = list.filter((subscription) => subscription.user?.id === userId);
+      }
+      if (planName) {
+        list = list.filter((subscription) =>
+          subscription.plan_name.toLowerCase().includes(planName),
+        );
+      }
+      if (Number.isFinite(templateId) && templateId > 0) {
+        list = list.filter((subscription) => subscription.template_id === templateId);
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({
+        subscriptions: data,
+        pagination,
+      });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateAdminSubscriptionRequest;
+      const createdAt = Date.now();
+      const newSubscription = {
+        id: generateId(),
+        user_id: data.user_id,
+        name: data.name,
+        plan_name: data.plan_name,
+        status: data.status ?? 'active',
+        template_id: data.template_id,
+        available_template_ids: data.available_template_ids,
+        token: data.token,
+        expires_at: data.expires_at,
+        traffic_total_bytes: data.traffic_total_bytes,
+        traffic_used_bytes: data.traffic_used_bytes ?? 0,
+        device_limit: data.devices_limit,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+
+      mockSubscriptions.unshift(newSubscription as UserSubscription);
+      return mockResponse({ subscription: buildAdminSubscriptionSummary(newSubscription as UserSubscription) }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}`);
+
+    if (method === 'GET') {
+      const subscription = mockSubscriptions.find((item) => item.id === id);
+      if (!subscription) return mockError('Subscription not found', 404);
+      return mockResponse({ subscription: buildAdminSubscriptionSummary(subscription) });
+    }
+
+    if (method === 'PATCH') {
+      const subscriptionIndex = mockSubscriptions.findIndex((item) => item.id === id);
+      if (subscriptionIndex === -1) return mockError('Subscription not found', 404);
+
+      const data = body as UpdateAdminSubscriptionRequest;
+      const current = mockSubscriptions[subscriptionIndex] as UserSubscription & {
+        plan_name?: string;
+        name?: string;
+        token?: string;
+        available_template_ids?: number[];
+        traffic_total_bytes?: number;
+        devices_limit?: number;
+      };
+
+      mockSubscriptions[subscriptionIndex] = {
+        ...current,
+        name: data.name ?? current.name,
+        plan_name: data.plan_name ?? current.plan_name,
+        status: data.status ?? current.status,
+        template_id: data.template_id ?? current.template_id,
+        available_template_ids: data.available_template_ids ?? current.available_template_ids,
+        token: data.token ?? current.token,
+        expires_at: data.expires_at ?? current.expires_at,
+        traffic_total_bytes: data.traffic_total_bytes ?? current.traffic_total_bytes,
+        traffic_used_bytes: data.traffic_used_bytes ?? current.traffic_used_bytes,
+        devices_limit: data.devices_limit ?? current.devices_limit,
+        device_limit: data.devices_limit ?? current.device_limit,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({
+        subscription: buildAdminSubscriptionSummary(mockSubscriptions[subscriptionIndex]),
+      });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}/disable`)) {
+    if (method === 'POST') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}/disable`);
+      const subscriptionIndex = mockSubscriptions.findIndex((item) => item.id === id);
+      if (subscriptionIndex === -1) return mockError('Subscription not found', 404);
+
+      mockSubscriptions[subscriptionIndex] = {
+        ...mockSubscriptions[subscriptionIndex],
+        status: 'disabled',
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({
+        subscription: buildAdminSubscriptionSummary(mockSubscriptions[subscriptionIndex]),
+      });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}/extend`)) {
+    if (method === 'POST') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/subscriptions/{id}/extend`);
+      const subscriptionIndex = mockSubscriptions.findIndex((item) => item.id === id);
+      if (subscriptionIndex === -1) return mockError('Subscription not found', 404);
+
+      const data = body as ExtendAdminSubscriptionRequest;
+      const current = mockSubscriptions[subscriptionIndex] as UserSubscription & { expires_at?: number };
+      const base = current.expires_at ?? Date.now();
+      const isMs = base > 1e12;
+      const unit = isMs ? 1000 : 1;
+      let nextExpiresAt = base;
+
+      if (data.expires_at) {
+        nextExpiresAt = data.expires_at;
+      } else if (data.extend_days) {
+        nextExpiresAt = base + data.extend_days * 24 * 60 * 60 * unit;
+      } else if (data.extend_hours) {
+        nextExpiresAt = base + data.extend_hours * 60 * 60 * unit;
+      }
+
+      mockSubscriptions[subscriptionIndex] = {
+        ...mockSubscriptions[subscriptionIndex],
+        expires_at: nextExpiresAt,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({
+        subscription: buildAdminSubscriptionSummary(mockSubscriptions[subscriptionIndex]),
       });
     }
   }
@@ -666,6 +1072,103 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         updated_at: Date.now(),
       };
       return mockResponse({ plan: normalizePlan(mockPlans[planIndex]) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/payment-channels`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const provider = query?.get('provider')?.trim().toLowerCase();
+      const enabledParam = query?.get('enabled')?.trim();
+      const sort = query?.get('sort')?.trim() || 'updated';
+      const direction = query?.get('direction')?.trim() || 'desc';
+
+      let list = [...mockPaymentChannels];
+
+      if (q) {
+        list = list.filter((channel) => {
+          const name = channel.name.toLowerCase();
+          const code = channel.code.toLowerCase();
+          return name.includes(q) || code.includes(q);
+        });
+      }
+
+      if (provider) {
+        list = list.filter((channel) =>
+          (channel.provider || '').toLowerCase().includes(provider),
+        );
+      }
+
+      if (enabledParam === 'true' || enabledParam === 'false') {
+        const enabled = enabledParam === 'true';
+        list = list.filter((channel) => (channel.enabled ?? false) === enabled);
+      }
+
+      list.sort((a, b) => {
+        const multiplier = direction === 'asc' ? 1 : -1;
+        if (sort === 'name') {
+          return a.name.localeCompare(b.name) * multiplier;
+        }
+        if (sort === 'created') {
+          return ((a.created_at ?? 0) - (b.created_at ?? 0)) * multiplier;
+        }
+        return ((a.updated_at ?? 0) - (b.updated_at ?? 0)) * multiplier;
+      });
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({ channels: data, pagination });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreatePaymentChannelRequest;
+      if (!data.name || !data.code) return mockError('Name and code required', 400);
+
+      const createdAt = Date.now();
+      const newChannel: PaymentChannelSummary = {
+        id: generateId(),
+        name: data.name,
+        code: data.code,
+        provider: data.provider,
+        enabled: data.enabled ?? true,
+        sort_order: data.sort_order ?? 0,
+        config: data.config,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+
+      mockPaymentChannels.push(newChannel);
+      return mockResponse({ channel: newChannel }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/payment-channels/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/payment-channels/{id}`);
+    const channelIndex = mockPaymentChannels.findIndex((channel) => channel.id === id);
+
+    if (method === 'GET') {
+      if (channelIndex === -1) return mockError('Payment channel not found', 404);
+      return mockResponse({ channel: mockPaymentChannels[channelIndex] });
+    }
+
+    if (method === 'PATCH') {
+      if (channelIndex === -1) return mockError('Payment channel not found', 404);
+
+      const data = body as UpdatePaymentChannelRequest;
+      const current = mockPaymentChannels[channelIndex];
+      mockPaymentChannels[channelIndex] = {
+        ...current,
+        name: data.name ?? current.name,
+        code: data.code ?? current.code,
+        provider: data.provider ?? current.provider,
+        enabled: data.enabled ?? current.enabled,
+        sort_order: data.sort_order ?? current.sort_order,
+        config: data.config ?? current.config,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ channel: mockPaymentChannels[channelIndex] });
     }
   }
 

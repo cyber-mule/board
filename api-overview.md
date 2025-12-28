@@ -7,8 +7,10 @@
 | 模块 | 路径 | 说明 |
 | ---- | ---- | ---- |
 | 仪表盘 | `/api/v1/{admin}/dashboard` | 展示模块导航、权限控制 |
+| 用户管理 | `/api/v1/{admin}/users` | 用户列表、创建、禁用、角色调整、重置密码、强制下线 |
 | 节点管理 | `/api/v1/{admin}/nodes` | 节点查询、协议内核同步 |
 | 订阅模板 | `/api/v1/{admin}/subscription-templates` | 模板 CRUD、发布、历史追溯 |
+| 订阅管理 | `/api/v1/{admin}/subscriptions` | 订阅列表、创建、调整、禁用、延长有效期 |
 | 套餐管理 | `/api/v1/{admin}/plans` | 套餐列表、创建、更新，字段涵盖价格、时长、流量限制等 |
 | 公告中心 | `/api/v1/{admin}/announcements` | 公告列表、创建、发布，支持置顶与可见时间窗 |
 | 安全配置 | `/api/v1/{admin}/security-settings` | 读取与更新第三方签名/加密开关、凭据与时间窗口 |
@@ -17,6 +19,8 @@
 > `{admin}` 为可配置的后台前缀，默认为 `admin`，可通过 `Admin.RoutePrefix` 自定义。
 
 ## 用户端模块
+
+> 注册/找回/验证接口已开放，需在配置中开启注册开关并配置邮件发送与验证码策略。
 
 - `/api/v1/user/subscriptions`：用户订阅列表、预览、模板切换。
 - `/api/v1/user/plans`：面向终端的套餐列表，返回价格、特性、流量限制等字段。
@@ -28,7 +32,7 @@
 
 - 用户端 `POST /api/v1/user/orders` 新增 `payment_method`、`payment_channel`、`payment_return_url` 字段：
   - 默认 `payment_method = balance`，系统直接扣减余额、记录 `balance_transactions`，订单状态立即变为 `paid`、`payment_status = succeeded`。
-  - 当 `payment_method = external` 且金额大于零时，会生成 `pending_payment` 订单，创建 `order_payments` 预订单记录，并返回 `payment_intent_id`、`payments` 列表供前端跳转支付；余额不会变动。
+  - 当 `payment_method = external` 且金额大于零时，会生成 `pending_payment` 订单，创建 `order_payments` 预订单记录，并按支付通道 `config` 发起支付；响应包含 `payment_intent_id` 与 `payments`，其中 `payments[].metadata.pay_url`/`qr_code` 可用于跳转或展示二维码，余额不会变动。
   - 当 `payment_method = manual` 时，会生成待支付订单；需管理员通过 `/api/v1/{admin}/orders/{id}/pay` 标记已支付。
 - 用户端 `POST /api/v1/user/orders/{id}/cancel` 仅允许取消待支付或零金额订单，不触发余额回滚。
 - 用户端 `GET /api/v1/user/orders/{id}/payment-status` 用于前端轮询确认支付结果。

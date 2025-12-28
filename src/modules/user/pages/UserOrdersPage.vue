@@ -5,6 +5,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -236,7 +244,10 @@ const selectedOrderId = ref<number | null>(null);
 const detail = ref<UserOrderDetailResponse | null>(null);
 const detailLoading = ref(false);
 const detailError = ref('');
-const cancelReasons = ref<Record<number, string>>({});
+const cancelTarget = ref<OrderDetail | null>(null);
+const cancelReason = ref('');
+const showCancelModal = ref(false);
+const isCanceling = ref(false);
 const autoRefresh = ref(false);
 let autoRefreshTimer: number | null = null;
 const copyMessage = ref('');
@@ -514,7 +525,8 @@ async function cancelOrder(order: OrderDetail) {
   actionError.value = '';
 
   try {
-    const response = await userApi.cancelUserOrder(order.id, cancelReasons.value[order.id]);
+    isCanceling.value = true;
+    const response = await userApi.cancelUserOrder(order.id, cancelReason.value || undefined);
     orders.value = orders.value.map((item) =>
       item.id === response.order.id ? response.order : item,
     );
@@ -522,9 +534,28 @@ async function cancelOrder(order: OrderDetail) {
       detail.value = { order: response.order, balance: response.balance };
     }
     actionMessage.value = `订单 #${response.order.number} 已取消。`;
+    showCancelModal.value = false;
+    cancelTarget.value = null;
+    cancelReason.value = '';
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : '取消订单失败';
+  } finally {
+    isCanceling.value = false;
   }
+}
+
+function openCancelModal(order: OrderDetail) {
+  actionMessage.value = '';
+  actionError.value = '';
+  cancelTarget.value = order;
+  cancelReason.value = '';
+  showCancelModal.value = true;
+}
+
+function closeCancelModal() {
+  showCancelModal.value = false;
+  cancelTarget.value = null;
+  cancelReason.value = '';
 }
 
 onMounted(() => {
@@ -681,7 +712,14 @@ onBeforeUnmount(() => {
       </CardHeader>
       <CardContent>
         <p v-if="loading" class="panel-card__empty">正在加载订单...</p>
-        <p v-else-if="orders.length === 0" class="panel-card__empty">暂无订单。</p>
+        <div v-else-if="orders.length === 0" class="panel-card__empty stack">
+          <span>暂无订单。</span>
+          <RouterLink to="/user/plans" custom v-slot="{ href, navigate }">
+            <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+              去选套餐
+            </Button>
+          </RouterLink>
+        </div>
         <ul v-else class="data-list">
           <li
             v-for="order in orders"
@@ -703,13 +741,7 @@ onBeforeUnmount(() => {
                 详情
               </Button>
               <div v-if="canCancel(order)" class="cluster cluster--center">
-                <Input
-                  v-model="cancelReasons[order.id]"
-                  class="min-w-[180px]"
-                  type="text"
-                  placeholder="取消原因（可选）"
-                />
-                <Button size="sm" type="button" @click="cancelOrder(order)">
+                <Button size="sm" type="button" @click="openCancelModal(order)">
                   取消订单
                 </Button>
               </div>
@@ -891,5 +923,33 @@ onBeforeUnmount(() => {
         </div>
       </CardContent>
     </Card>
+
+    <Dialog :open="showCancelModal" @update:open="value => { if (!value) closeCancelModal(); }">
+      <DialogContent class="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>取消订单</DialogTitle>
+          <DialogDescription>
+            确认取消订单 {{ cancelTarget ? `#${cancelTarget.number}` : '' }}？取消后将释放订单。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="stack stack--tight">
+            <Label>取消原因</Label>
+            <Input v-model="cancelReason" type="text" placeholder="可选" />
+          </div>
+        </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeCancelModal">返回</Button>
+          <Button
+            variant="destructive"
+            type="button"
+            :disabled="isCanceling || !cancelTarget"
+            @click="cancelTarget && cancelOrder(cancelTarget)"
+          >
+            {{ isCanceling ? '取消中...' : '确认取消' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

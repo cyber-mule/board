@@ -99,6 +99,7 @@ const compare = ref<{
   current: UserSubscriptionPreview;
   selected: UserSubscriptionPreview;
 } | null>(null);
+const toolTab = ref<'preview' | 'compare'>('preview');
 const selectedSubscription = computed(() => {
   return (
     subscriptions.value.find(
@@ -106,6 +107,23 @@ const selectedSubscription = computed(() => {
     ) ?? null
   );
 });
+const detailMessage = ref('');
+const detailError = ref('');
+const subscriptionUrl = computed(() => {
+  const subscription = selectedSubscription.value;
+  if (!subscription) {
+    return '';
+  }
+  return subscription.subscription_url || subscription.subscribe_url || '';
+});
+const subscriptionToken = computed(() => {
+  return selectedSubscription.value?.token ?? '';
+});
+const qrCodeUrl = ref('');
+const qrLoading = ref(false);
+const qrError = ref('');
+const showQr = ref(false);
+const qrSource = ref('');
 
 const isPreviewReady = computed(() => preview.value !== null && !previewLoading.value);
 const maxDiffLines = 200;
@@ -667,6 +685,7 @@ async function jumpToPage() {
 }
 
 async function handlePreview(subscription: UserSubscriptionSummary) {
+  toolTab.value = 'preview';
   previewLoading.value = true;
   previewError.value = '';
   previewActionError.value = '';
@@ -689,6 +708,7 @@ async function handlePreview(subscription: UserSubscriptionSummary) {
 }
 
 async function handleCompare(subscription: UserSubscriptionSummary) {
+  toolTab.value = 'compare';
   compareLoading.value = true;
   compareError.value = '';
   compareMessage.value = '';
@@ -766,6 +786,63 @@ async function applyTemplate() {
     actionError.value = error instanceof Error ? error.message : '更新模板失败';
   } finally {
     applyLoading.value = false;
+  }
+}
+
+async function copyDetail(label: string, value: string) {
+  detailMessage.value = '';
+  detailError.value = '';
+
+  if (!value) {
+    detailError.value = `${label}不可用。`;
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(value);
+    detailMessage.value = `${label}已复制。`;
+  } catch (error) {
+    detailError.value = `复制${label}失败。`;
+  }
+}
+
+async function loadQrCode(value: string) {
+  qrLoading.value = true;
+  qrError.value = '';
+
+  try {
+    const module = await import(
+      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'
+    );
+    const api = module.toDataURL ? module : module.default;
+    if (!api?.toDataURL) {
+      throw new Error('QRCode module missing toDataURL');
+    }
+    qrCodeUrl.value = await api.toDataURL(value, { width: 180, margin: 1 });
+    qrSource.value = value;
+  } catch (error) {
+    qrCodeUrl.value = '';
+    qrError.value = '二维码生成失败，请稍后重试。';
+  } finally {
+    qrLoading.value = false;
+  }
+}
+
+async function toggleQr() {
+  detailMessage.value = '';
+  detailError.value = '';
+  qrError.value = '';
+
+  if (!subscriptionUrl.value) {
+    detailError.value = '订阅地址不可用，无法生成二维码。';
+    return;
+  }
+
+  showQr.value = !showQr.value;
+  if (showQr.value) {
+    if (!qrCodeUrl.value || qrSource.value !== subscriptionUrl.value) {
+      await loadQrCode(subscriptionUrl.value);
+    }
   }
 }
 
@@ -861,6 +938,13 @@ watch(selectedSubscriptionId, () => {
   compare.value = null;
   compareError.value = '';
   compareMessage.value = '';
+  toolTab.value = 'preview';
+  detailMessage.value = '';
+  detailError.value = '';
+  showQr.value = false;
+  qrCodeUrl.value = '';
+  qrError.value = '';
+  qrSource.value = '';
 });
 </script>
 
@@ -945,6 +1029,29 @@ watch(selectedSubscriptionId, () => {
       <AlertDescription>{{ actionError }}</AlertDescription>
     </Alert>
 
+    <Card class="panel-card--full">
+      <CardHeader>
+        <CardTitle>订阅使用指引</CardTitle>
+        <p class="panel-card__meta">按步骤完成模板切换与预览。</p>
+      </CardHeader>
+      <CardContent>
+        <div class="step-grid">
+          <div class="step-card">
+            <p class="step-card__title">1. 选择订阅</p>
+            <p class="step-card__desc">从左侧列表选中需要操作的订阅。</p>
+          </div>
+          <div class="step-card">
+            <p class="step-card__title">2. 选择模板</p>
+            <p class="step-card__desc">切换模板并查看差异，确认后应用。</p>
+          </div>
+          <div class="step-card">
+            <p class="step-card__title">3. 预览/比较</p>
+            <p class="step-card__desc">查看预览内容，必要时下载或复制。</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
     <Card>
       <CardHeader>
         <CardTitle>订阅列表</CardTitle>
@@ -952,9 +1059,14 @@ watch(selectedSubscriptionId, () => {
       </CardHeader>
       <CardContent>
         <p v-if="loading" class="panel-card__empty">正在加载订阅...</p>
-        <p v-else-if="subscriptions.length === 0" class="panel-card__empty">
-          当前筛选条件下暂无订阅。
-        </p>
+        <div v-else-if="subscriptions.length === 0" class="panel-card__empty stack">
+          <span>当前筛选条件下暂无订阅。</span>
+          <RouterLink to="/user/plans" custom v-slot="{ href, navigate }">
+            <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+              去选套餐
+            </Button>
+          </RouterLink>
+        </div>
         <ul v-else class="data-list">
           <li
             v-for="subscription in subscriptions"
@@ -1106,6 +1218,67 @@ watch(selectedSubscriptionId, () => {
               </p>
             </div>
           </div>
+          <div class="detail-grid">
+            <div>
+              <p class="detail-label">订阅地址</p>
+              <p class="detail-value">{{ subscriptionUrl || '未提供' }}</p>
+            </div>
+            <div>
+              <p class="detail-label">订阅 Token</p>
+              <p class="detail-value">{{ subscriptionToken || '-' }}</p>
+            </div>
+          </div>
+          <div class="cluster cluster--center">
+            <Button
+              size="sm"
+              variant="secondary"
+              type="button"
+              :disabled="!subscriptionUrl"
+              @click="copyDetail('订阅地址', subscriptionUrl)"
+            >
+              复制地址
+            </Button>
+            <Button
+              v-if="subscriptionUrl"
+              size="sm"
+              variant="ghost"
+              type="button"
+              :as="'a'"
+              :href="subscriptionUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              打开链接
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              :disabled="!subscriptionToken"
+              @click="copyDetail('订阅 Token', subscriptionToken)"
+            >
+              复制 Token
+            </Button>
+            <Button size="sm" variant="ghost" type="button" @click="toggleQr">
+              {{ showQr ? '隐藏二维码' : '生成二维码' }}
+            </Button>
+          </div>
+          <div v-if="showQr" class="qr-panel">
+            <p v-if="qrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
+            <img v-else-if="qrCodeUrl" :src="qrCodeUrl" alt="订阅二维码" class="qr-image" />
+            <p v-else class="text-xs text-muted-foreground">{{ qrError || '二维码不可用。' }}</p>
+          </div>
+          <p v-if="!subscriptionUrl && subscriptionToken" class="text-xs text-muted-foreground">
+            订阅地址未返回，可复制 Token 联系管理员确认订阅入口。
+          </p>
+          <Alert v-if="detailMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+            <AlertTitle>操作成功</AlertTitle>
+            <AlertDescription>{{ detailMessage }}</AlertDescription>
+          </Alert>
+          <Alert v-if="detailError" variant="destructive">
+            <AlertTitle>操作失败</AlertTitle>
+            <AlertDescription>{{ detailError }}</AlertDescription>
+          </Alert>
           <div class="cluster cluster--center">
             <Button
               variant="ghost"
@@ -1143,6 +1316,40 @@ watch(selectedSubscriptionId, () => {
     </Card>
 
     <Card>
+      <CardHeader class="cluster cluster--between cluster--start cluster--wide">
+        <div>
+          <CardTitle>订阅工具</CardTitle>
+          <p class="panel-card__meta">选择预览或比较视图。</p>
+        </div>
+        <div class="cluster cluster--center">
+          <Button
+            size="sm"
+            :variant="toolTab === 'preview' ? 'default' : 'secondary'"
+            type="button"
+            @click="toolTab = 'preview'"
+          >
+            预览
+          </Button>
+          <Button
+            size="sm"
+            :variant="toolTab === 'compare' ? 'default' : 'secondary'"
+            type="button"
+            @click="toolTab = 'compare'"
+          >
+            比较
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p class="text-sm text-muted-foreground">
+          {{ toolTab === 'preview'
+            ? '预览当前模板内容，支持复制与下载。'
+            : '比较当前模板与所选模板的差异。' }}
+        </p>
+      </CardContent>
+    </Card>
+
+    <Card v-if="toolTab === 'preview'">
       <CardHeader>
         <CardTitle>订阅预览</CardTitle>
         <p class="panel-card__meta">
@@ -1195,7 +1402,7 @@ watch(selectedSubscriptionId, () => {
       </CardContent>
     </Card>
 
-    <Card>
+    <Card v-else>
       <CardHeader class="cluster cluster--between cluster--start cluster--wide">
         <div>
           <CardTitle>模板比较</CardTitle>

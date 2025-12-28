@@ -14,6 +14,9 @@
 
 - 登录：`POST /api/v1/auth/login` 获取 `access_token` 与 `refresh_token`。
 - 刷新：`POST /api/v1/auth/refresh` 换取新令牌。
+- 注册：`POST /api/v1/auth/register` 创建账号，若要求验证会返回 `requires_verification=true`。
+- 验证：`POST /api/v1/auth/verify` 使用验证码激活账号并返回令牌。
+- 找回：`POST /api/v1/auth/forgot` 获取验证码，`POST /api/v1/auth/reset` 完成重置。
 - 鉴权方式：`Authorization: Bearer <access_token>`
 - 角色约束：
   - 管理端接口需要 `admin` 角色。
@@ -28,7 +31,7 @@
   - `403` 权限不足或访问受限
   - `404` 资源不存在
   - `409` 冲突（并发/状态不允许）
-  - `429` 超出速率限制（管理端 IP 限流）
+  - `429` 超出速率限制（管理端 IP 限流/验证码频控）
   - `500` 未捕获错误
 
 ## 第三方签名与加密（可选）
@@ -142,7 +145,7 @@ METHOD\nPATH\nRAW_QUERY\nTIMESTAMP\nNONCE\nBASE64(BODY)
 - `currency` string
 - `failure_code` string
 - `failure_message` string
-- `metadata` object
+- `metadata` object（常见字段：`pay_url`、`qr_code`、`gateway_intent_id`、`notify_url`、`return_url`）
 - `created_at` int64
 - `updated_at` int64
 
@@ -211,6 +214,50 @@ METHOD\nPATH\nRAW_QUERY\nTIMESTAMP\nNONCE\nBASE64(BODY)
   - `refresh_token` string
 - 响应：同 `auth/login`
 
+#### POST /api/v1/auth/register
+
+- 说明：注册账号
+- 请求体：
+  - `email` string
+  - `password` string
+  - `display_name` string（可选）
+  - `invite_code` string（可选）
+- 备注：当 `Auth.Registration.InviteOnly=true` 时，必须提供 `invite_code`。
+- 响应：
+  - `requires_verification` bool
+  - `access_token` string（可选）
+  - `refresh_token` string（可选）
+  - `token_type` string（可选）
+  - `expires_in` int64（可选）
+  - `refresh_expires_in` int64（可选）
+  - `user` AuthenticatedUser
+
+#### POST /api/v1/auth/verify
+
+- 说明：邮箱验证码验证
+- 请求体：
+  - `email` string
+  - `code` string
+- 响应：同 `auth/login`
+
+#### POST /api/v1/auth/forgot
+
+- 说明：发送密码重置验证码
+- 请求体：
+  - `email` string
+- 响应：
+  - `message` string
+
+#### POST /api/v1/auth/reset
+
+- 说明：使用验证码重置密码
+- 请求体：
+  - `email` string
+  - `code` string
+  - `password` string
+- 响应：
+  - `message` string
+
 ### 管理端（需要 admin 权限）
 
 > 实际路径：`/api/v1/{adminPrefix}`
@@ -226,6 +273,64 @@ METHOD\nPATH\nRAW_QUERY\nTIMESTAMP\nNONCE\nBASE64(BODY)
     - `icon` string
     - `route` string
     - `permissions` []string
+
+#### GET /api/v1/{adminPrefix}/users
+
+- 说明：用户列表
+- 查询参数：`page`、`per_page`、`q`、`status`、`role`
+- 响应：
+  - `users` []AdminUserSummary
+  - `pagination` PaginationMeta
+
+AdminUserSummary 字段：
+
+- `id`、`email`、`display_name`、`roles`、`status`
+- `email_verified_at`（可选）、`failed_login_attempts`
+- `locked_until`（可选）、`last_login_at`（可选）
+- `created_at`、`updated_at`
+
+#### POST /api/v1/{adminPrefix}/users
+
+- 说明：创建用户
+- 请求体：
+  - `email` string
+  - `password` string
+  - `display_name` string（可选）
+  - `roles` []string（可选）
+  - `status` string（可选）
+  - `email_verified` bool（可选）
+- 响应：
+  - `user` AdminUserSummary
+
+#### PATCH /api/v1/{adminPrefix}/users/{id}/status
+
+- 说明：更新用户状态
+- 请求体：
+  - `status` string（示例：`active`、`disabled`、`pending`）
+- 响应：
+  - `user` AdminUserSummary
+
+#### PATCH /api/v1/{adminPrefix}/users/{id}/roles
+
+- 说明：更新用户角色
+- 请求体：
+  - `roles` []string
+- 响应：
+  - `user` AdminUserSummary
+
+#### POST /api/v1/{adminPrefix}/users/{id}/reset-password
+
+- 说明：重置用户密码
+- 请求体：
+  - `password` string
+- 响应：
+  - `message` string
+
+#### POST /api/v1/{adminPrefix}/users/{id}/force-logout
+
+- 说明：强制下线用户
+- 响应：
+  - `message` string
 
 #### GET /api/v1/{adminPrefix}/nodes
 
@@ -265,6 +370,86 @@ NodeKernelSummary 字段：
   - `revision` string
   - `synced_at` int64
   - `message` string
+
+#### GET /api/v1/{adminPrefix}/subscriptions
+
+- 说明：订阅列表
+- 查询参数：`page`、`per_page`、`q`、`status`、`user_id`、`plan_name`、`template_id`
+- 响应：
+  - `subscriptions` []AdminSubscriptionSummary
+  - `pagination` PaginationMeta
+
+AdminSubscriptionUserSummary 字段：
+
+- `id`、`email`、`display_name`
+
+AdminSubscriptionSummary 字段：
+
+- `id`、`user`
+- `name`、`plan_name`、`status`
+- `template_id`、`available_template_ids`
+- `token`、`expires_at`
+- `traffic_total_bytes`、`traffic_used_bytes`
+- `devices_limit`、`last_refreshed_at`
+- `created_at`、`updated_at`
+
+#### GET /api/v1/{adminPrefix}/subscriptions/{id}
+
+- 说明：订阅详情
+- 路径参数：`id` uint64
+- 响应：
+  - `subscription` AdminSubscriptionSummary
+
+#### POST /api/v1/{adminPrefix}/subscriptions
+
+- 说明：创建订阅
+- 请求体：
+  - `user_id` uint64
+  - `name` string
+  - `plan_name` string
+  - `status` string（可选）
+  - `template_id` uint64
+  - `available_template_ids` []uint64（可选）
+  - `token` string（可选）
+  - `expires_at` int64
+  - `traffic_total_bytes` int64
+  - `traffic_used_bytes` int64（可选）
+  - `devices_limit` int
+- 响应：
+  - `subscription` AdminSubscriptionSummary
+
+#### PATCH /api/v1/{adminPrefix}/subscriptions/{id}
+
+- 说明：更新订阅
+- 路径参数：`id` uint64
+- 请求体（字段均可选）：
+  - `name`、`plan_name`、`status`
+  - `template_id`、`available_template_ids`
+  - `token`、`expires_at`
+  - `traffic_total_bytes`、`traffic_used_bytes`
+  - `devices_limit`
+- 响应：
+  - `subscription` AdminSubscriptionSummary
+
+#### POST /api/v1/{adminPrefix}/subscriptions/{id}/disable
+
+- 说明：禁用订阅
+- 路径参数：`id` uint64
+- 请求体：
+  - `reason` string（可选）
+- 响应：
+  - `subscription` AdminSubscriptionSummary
+
+#### POST /api/v1/{adminPrefix}/subscriptions/{id}/extend
+
+- 说明：延长订阅有效期（`extend_days`/`extend_hours` 与 `expires_at` 二选一）
+- 路径参数：`id` uint64
+- 请求体：
+  - `extend_days` int（可选）
+  - `extend_hours` int（可选）
+  - `expires_at` int64（可选）
+- 响应：
+  - `subscription` AdminSubscriptionSummary
 
 #### GET /api/v1/{adminPrefix}/subscription-templates
 
@@ -407,6 +592,39 @@ PaymentChannelSummary 字段：
 - `id`、`name`、`code`、`provider`
 - `enabled`、`sort_order`、`config`
 - `created_at`、`updated_at`
+
+支付通道 `config`（外部支付发起）示例：
+
+```json
+{
+  "mode": "http",
+  "notify_url": "https://example.com/api/v1/payments/callback?order_id={{order_id}}&payment_id={{payment_id}}",
+  "return_url": "https://example.com/orders/{{order_number}}",
+  "http": {
+    "endpoint": "https://gateway.example.com/pay",
+    "method": "POST",
+    "body_type": "json",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "payload": {
+      "order_no": "{{order_number}}",
+      "amount": "{{amount}}",
+      "notify_url": "{{notify_url}}",
+      "return_url": "{{return_url}}"
+    }
+  },
+  "response": {
+    "pay_url": "data.pay_url",
+    "qr_code": "data.qr_code",
+    "reference": "data.reference"
+  }
+}
+```
+
+`notify_url`/`return_url`/`payload` 支持模板变量：`{{order_id}}`、`{{order_number}}`、`{{payment_id}}`、`{{payment_intent_id}}`、`{{amount_cents}}`、`{{amount}}`、`{{currency}}`、`{{user_id}}`、`{{plan_id}}`、`{{plan_name}}`、`{{quantity}}`、`{{payment_channel}}`、`{{payment_provider}}`。
+
+`response` 字段支持点路径（如 `data.pay_url`），`pay_url` 设为 `$` 可直接使用原始响应体字符串。
 
 #### GET /api/v1/{adminPrefix}/payment-channels/{id}
 
@@ -594,6 +812,13 @@ AdminOrderDetail 字段：
 - 响应：
   - `order` AdminOrderDetail
 
+#### POST /api/v1/payments/callback
+
+- 说明：外部支付回调（免登录，Webhook 专用）
+- 认证：`X-ZNP-Webhook-Token` 或 `Stripe-Signature`（取决于 `Webhook` 配置）
+- 请求体：同 `/api/v1/{adminPrefix}/orders/payments/callback`
+- 响应：同上
+
 ### 用户端（需要 user 权限）
 
 #### GET /api/v1/user/subscriptions
@@ -675,6 +900,18 @@ UserAnnouncementSummary 字段：
   - `transactions` []BalanceTransactionSummary
   - `pagination` PaginationMeta
 
+#### GET /api/v1/user/payment-channels
+
+- 说明：用户侧支付通道列表（仅返回启用通道）
+- 查询参数：`provider`（可选）
+- 响应：
+  - `channels` []UserPaymentChannelSummary
+
+UserPaymentChannelSummary 字段：
+
+- `id`、`name`、`code`、`provider`
+- `sort_order`、`config`
+
 #### POST /api/v1/user/orders
 
 - 说明：下单
@@ -685,6 +922,9 @@ UserAnnouncementSummary 字段：
   - `payment_channel` string（可选，外部支付通道）
   - `payment_return_url` string（可选）
   - `idempotency_key` string（可选，幂等键）
+- 外部支付说明：
+  - `payment_method=external` 且金额大于 0 时，需传启用的 `payment_channel` 且通道 `config` 已配置网关发起信息。
+  - 响应 `order.payments[].metadata` 将包含 `pay_url` 或 `qr_code`，用于跳转支付页或展示二维码。
 - 响应：
   - `order` OrderDetail
   - `balance` BalanceSnapshot

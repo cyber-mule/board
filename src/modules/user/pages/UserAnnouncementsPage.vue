@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select';
 import { userApi } from '../../../api';
 import { formatDateTime } from '../../../utils/format';
+import { sanitizeHtml } from '../../../utils/sanitize';
 import type { UserAnnouncementSummary } from '../../../api/types';
 
 const announcements = ref<UserAnnouncementSummary[]>([]);
@@ -83,6 +84,10 @@ const selectedAnnouncement = computed(() => {
       (announcement) => announcement.id === selectedAnnouncementId.value,
     ) ?? null
   );
+});
+
+const sanitizedContent = computed(() => {
+  return sanitizeHtml(selectedAnnouncement.value?.content ?? '');
 });
 
 function ensureSelection(list: UserAnnouncementSummary[]) {
@@ -281,11 +286,7 @@ watch(
                 <p class="detail-value">{{ selectedAnnouncement.priority ?? '-' }}</p>
               </div>
             </div>
-            <div
-              v-if="selectedAnnouncement.content"
-              class="preview__content"
-              v-html="selectedAnnouncement.content"
-            />
+            <div v-if="selectedAnnouncement.content" class="rich-text-content" v-html="sanitizedContent" />
             <div v-else class="preview__content">暂无公告内容。</div>
           </div>
         </CardContent>

@@ -6,14 +6,18 @@ import AdminDashboard from '../modules/admin/pages/AdminDashboard.vue';
 import AdminNodesPage from '../modules/admin/pages/AdminNodesPage.vue';
 import AdminOrdersPage from '../modules/admin/pages/AdminOrdersPage.vue';
 import AdminPlansPage from '../modules/admin/pages/AdminPlansPage.vue';
+import AdminSubscriptionsPage from '../modules/admin/pages/AdminSubscriptionsPage.vue';
 import AdminTemplatesPage from '../modules/admin/pages/AdminTemplatesPage.vue';
 import AdminAnnouncementsPage from '../modules/admin/pages/AdminAnnouncementsPage.vue';
+import AdminPaymentChannelsPage from '../modules/admin/pages/AdminPaymentChannelsPage.vue';
 import AdminSecurityPage from '../modules/admin/pages/AdminSecurityPage.vue';
+import AdminUsersPage from '../modules/admin/pages/AdminUsersPage.vue';
 import UserLayout from '../modules/user/pages/UserLayout.vue';
 import UserDashboard from '../modules/user/pages/UserDashboard.vue';
 import UserAnnouncementsPage from '../modules/user/pages/UserAnnouncementsPage.vue';
 import UserOrdersPage from '../modules/user/pages/UserOrdersPage.vue';
 import UserPlansPage from '../modules/user/pages/UserPlansPage.vue';
+import UserBalancePage from '../modules/user/pages/UserBalancePage.vue';
 import UserSubscriptionsPage from '../modules/user/pages/UserSubscriptionsPage.vue';
 import LoginPage from '../modules/shared/pages/LoginPage.vue';
 
@@ -27,9 +31,16 @@ const routes = [
     children: [
       { path: '', name: 'admin', component: AdminDashboard },
       { path: 'nodes', name: 'admin-nodes', component: AdminNodesPage },
+      { path: 'users', name: 'admin-users', component: AdminUsersPage },
+      { path: 'subscriptions', name: 'admin-subscriptions', component: AdminSubscriptionsPage },
       { path: 'templates', name: 'admin-templates', component: AdminTemplatesPage },
       { path: 'plans', name: 'admin-plans', component: AdminPlansPage },
       { path: 'announcements', name: 'admin-announcements', component: AdminAnnouncementsPage },
+      {
+        path: 'payment-channels',
+        name: 'admin-payment-channels',
+        component: AdminPaymentChannelsPage,
+      },
       { path: 'security', name: 'admin-security', component: AdminSecurityPage },
       { path: 'orders', name: 'admin-orders', component: AdminOrdersPage },
     ],
@@ -43,6 +54,7 @@ const routes = [
       { path: 'subscriptions', name: 'user-subscriptions', component: UserSubscriptionsPage },
       { path: 'plans', name: 'user-plans', component: UserPlansPage },
       { path: 'orders', name: 'user-orders', component: UserOrdersPage },
+      { path: 'balance', name: 'user-balance', component: UserBalancePage },
       { path: 'announcements', name: 'user-announcements', component: UserAnnouncementsPage },
     ],
   },

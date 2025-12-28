@@ -381,9 +381,12 @@ watch(
         </CardHeader>
         <CardContent>
           <p v-if="loading" class="panel-card__empty">正在加载套餐...</p>
-          <p v-else-if="filteredPlans.length === 0" class="panel-card__empty">
-            当前筛选条件下暂无套餐。
-          </p>
+          <div v-else-if="filteredPlans.length === 0" class="panel-card__empty stack">
+            <span>当前筛选条件下暂无套餐。</span>
+            <Button variant="secondary" size="sm" type="button" @click="clearPriceRange">
+              清除筛选
+            </Button>
+          </div>
           <ul v-else class="data-list">
             <li
               v-for="plan in filteredPlans"
@@ -450,6 +453,18 @@ watch(
           </div>
           <div v-if="orderResult.order.payment_intent_id" class="panel-card__empty">
             支付意向：{{ orderResult.order.payment_intent_id }}
+          </div>
+          <div class="cluster">
+            <RouterLink to="/user/orders" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                查看订单
+              </Button>
+            </RouterLink>
+            <RouterLink to="/user/subscriptions" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="ghost" @click="navigate">
+                查看订阅
+              </Button>
+            </RouterLink>
           </div>
         </CardContent>
       </Card>

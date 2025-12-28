@@ -14,6 +14,7 @@ import type {
   SubscriptionTemplateSummary,
   AdminOrderDetail,
   SecuritySetting,
+  PaymentChannelSummary,
 } from '../api/types';
 
 // Mock Users
@@ -23,7 +24,12 @@ export const mockUsers: User[] = [
     email: 'user@example.com',
     display_name: 'Test User',
     role: 'user',
+    roles: ['user'],
+    status: 'active',
     balance_cents: 100000, // $1000
+    email_verified_at: Date.now() - 20 * 24 * 60 * 60 * 1000,
+    failed_login_attempts: 0,
+    last_login_at: Date.now() - 2 * 24 * 60 * 60 * 1000,
     created_at: Date.now() - 30 * 24 * 60 * 60 * 1000,
     updated_at: Date.now(),
   },
@@ -32,7 +38,12 @@ export const mockUsers: User[] = [
     email: 'admin@example.com',
     display_name: 'Admin User',
     role: 'admin',
+    roles: ['admin'],
+    status: 'active',
     balance_cents: 0,
+    email_verified_at: Date.now() - 80 * 24 * 60 * 60 * 1000,
+    failed_login_attempts: 1,
+    last_login_at: Date.now() - 6 * 60 * 60 * 1000,
     created_at: Date.now() - 90 * 24 * 60 * 60 * 1000,
     updated_at: Date.now(),
   },
@@ -117,6 +128,8 @@ export const mockSubscriptions: UserSubscription[] = [
     plan_id: 2,
     plan: mockPlans[1],
     status: 'active',
+    template_id: 1,
+    token: 'abc123',
     started_at: Date.now() - 10 * 24 * 60 * 60 * 1000,
     expires_at: Date.now() + 20 * 24 * 60 * 60 * 1000,
     traffic_used_bytes: 50 * 1024 * 1024 * 1024, // 50GB used
@@ -399,6 +412,59 @@ export const mockTemplates: SubscriptionTemplateSummary[] = [
     is_published: false,
     created_at: Date.now() - 10 * 24 * 60 * 60 * 1000,
     updated_at: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+];
+
+// Mock Payment Channels
+export const mockPaymentChannels: PaymentChannelSummary[] = [
+  {
+    id: 1,
+    name: 'Stripe Checkout',
+    code: 'stripe_checkout',
+    provider: 'stripe',
+    enabled: true,
+    sort_order: 1,
+    config: {
+      mode: 'http',
+      notify_url:
+        'https://example.com/api/v1/payments/callback?order_id={{order_id}}&payment_id={{payment_id}}',
+      return_url: 'https://example.com/orders/{{order_number}}',
+      http: {
+        endpoint: 'https://gateway.example.com/pay',
+        method: 'POST',
+        body_type: 'json',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        payload: {
+          order_no: '{{order_number}}',
+          amount: '{{amount}}',
+          notify_url: '{{notify_url}}',
+          return_url: '{{return_url}}',
+        },
+      },
+      response: {
+        pay_url: 'data.pay_url',
+        qr_code: 'data.qr_code',
+        reference: 'data.reference',
+      },
+    },
+    created_at: Date.now() - 35 * 24 * 60 * 60 * 1000,
+    updated_at: Date.now() - 7 * 24 * 60 * 60 * 1000,
+  },
+  {
+    id: 2,
+    name: 'Manual Transfer',
+    code: 'manual_transfer',
+    provider: 'offline',
+    enabled: false,
+    sort_order: 2,
+    config: {
+      mode: 'manual',
+      instructions: 'Bank transfer or offline settlement.',
+    },
+    created_at: Date.now() - 20 * 24 * 60 * 60 * 1000,
+    updated_at: Date.now() - 3 * 24 * 60 * 60 * 1000,
   },
 ];
 

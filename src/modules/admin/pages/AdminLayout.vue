@@ -48,6 +48,17 @@ function handleLogout() {
           节点
         </Button>
       </RouterLink>
+      <RouterLink to="/admin/users" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          用户
+        </Button>
+      </RouterLink>
       <RouterLink to="/admin/templates" custom v-slot="{ href, navigate, isActive }">
         <Button
           :as="'a'"
@@ -57,6 +68,17 @@ function handleLogout() {
           @click="navigate"
         >
           模板
+        </Button>
+      </RouterLink>
+      <RouterLink to="/admin/subscriptions" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          订阅
         </Button>
       </RouterLink>
       <RouterLink to="/admin/plans" custom v-slot="{ href, navigate, isActive }">
@@ -79,6 +101,17 @@ function handleLogout() {
           @click="navigate"
         >
           公告
+        </Button>
+      </RouterLink>
+      <RouterLink to="/admin/payment-channels" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          支付配置
         </Button>
       </RouterLink>
       <RouterLink to="/admin/security" custom v-slot="{ href, navigate, isActive }">

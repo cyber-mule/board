@@ -5,29 +5,46 @@ import type {
   AdminDashboardResponse,
   AdminOrderDetail,
   AdminOrderDetailResponse,
+  AdminSubscriptionResponse,
+  AdminUserResponse,
+  AdminUserSummary,
   AnnouncementSummary,
   CancelOrderRequest,
+  CreateAdminSubscriptionRequest,
+  CreateAdminUserRequest,
   CreateAnnouncementRequest,
+  CreatePaymentChannelRequest,
   CreatePlanRequest,
   CreateTemplateRequest,
+  DisableAdminSubscriptionRequest,
+  ExtendAdminSubscriptionRequest,
+  MessageResponse,
   NodeKernelSummary,
   NodeSummary,
   PaginationMeta,
   PayOrderRequest,
+  PaymentChannelResponse,
+  PaymentChannelSummary,
   PlanSummary,
   PublishAnnouncementRequest,
   PublishTemplateRequest,
   PublishTemplateResponse,
   RefundOrderRequest,
   RefundOrderResponse,
+  ResetUserPasswordRequest,
   SecuritySettingsResponse,
+  AdminSubscriptionSummary,
   SubscriptionTemplateSummary,
   SyncNodeKernelsResponse,
   TemplateHistoryResponse,
   UpdateAnnouncementRequest,
+  UpdateAdminSubscriptionRequest,
+  UpdatePaymentChannelRequest,
   UpdatePlanRequest,
   UpdateSecuritySettingsRequest,
   UpdateTemplateRequest,
+  UpdateUserRolesRequest,
+  UpdateUserStatusRequest,
 } from '../types';
 
 type PaginationQuery = {
@@ -51,6 +68,14 @@ type AdminPlansQuery = PaginationQuery & {
   visible?: boolean;
 };
 
+type AdminPaymentChannelsQuery = PaginationQuery & {
+  sort?: string;
+  direction?: string;
+  q?: string;
+  provider?: string;
+  enabled?: boolean;
+};
+
 type AdminOrdersQuery = PaginationQuery & {
   status?: string;
   payment_method?: string;
@@ -70,6 +95,12 @@ type AdminAnnouncementsQuery = PaginationQuery & {
   direction?: string;
 };
 
+type AdminUsersQuery = PaginationQuery & {
+  q?: string;
+  status?: string;
+  role?: string;
+};
+
 type AdminTemplatesQuery = PaginationQuery & {
   sort?: string;
   direction?: string;
@@ -79,12 +110,100 @@ type AdminTemplatesQuery = PaginationQuery & {
   include_drafts?: boolean;
 };
 
+type AdminSubscriptionsQuery = PaginationQuery & {
+  sort?: string;
+  direction?: string;
+  q?: string;
+  status?: string;
+  user_id?: number;
+  plan_name?: string;
+  template_id?: number;
+};
+
 type PaginatedResponse<T> = {
   pagination: PaginationMeta;
 } & T;
 
 export function fetchAdminDashboard() {
   return requestJson<AdminDashboardResponse>(adminPath('/dashboard'));
+}
+
+export function fetchAdminUsers(query: AdminUsersQuery = {}) {
+  return requestJson<PaginatedResponse<{ users: AdminUserSummary[] }>>(
+    withQuery(adminPath('/users'), query),
+  );
+}
+
+export function createAdminUser(payload: CreateAdminUserRequest) {
+  return requestJson<AdminUserResponse>(adminPath('/users'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminUserStatus(id: number, payload: UpdateUserStatusRequest) {
+  return requestJson<AdminUserResponse>(adminPath(`/users/${id}/status`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function updateAdminUserRoles(id: number, payload: UpdateUserRolesRequest) {
+  return requestJson<AdminUserResponse>(adminPath(`/users/${id}/roles`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function resetAdminUserPassword(id: number, payload: ResetUserPasswordRequest) {
+  return requestJson<MessageResponse>(adminPath(`/users/${id}/reset-password`), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function forceAdminUserLogout(id: number) {
+  return requestJson<MessageResponse>(adminPath(`/users/${id}/force-logout`), {
+    method: 'POST',
+  });
+}
+
+export function fetchAdminSubscriptions(query: AdminSubscriptionsQuery = {}) {
+  return requestJson<PaginatedResponse<{ subscriptions: AdminSubscriptionSummary[] }>>(
+    withQuery(adminPath('/subscriptions'), query),
+  );
+}
+
+export function fetchAdminSubscriptionDetail(id: number) {
+  return requestJson<AdminSubscriptionResponse>(adminPath(`/subscriptions/${id}`));
+}
+
+export function createAdminSubscription(payload: CreateAdminSubscriptionRequest) {
+  return requestJson<AdminSubscriptionResponse>(adminPath('/subscriptions'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminSubscription(id: number, payload: UpdateAdminSubscriptionRequest) {
+  return requestJson<AdminSubscriptionResponse>(adminPath(`/subscriptions/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function disableAdminSubscription(id: number, payload: DisableAdminSubscriptionRequest = {}) {
+  return requestJson<AdminSubscriptionResponse>(adminPath(`/subscriptions/${id}/disable`), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function extendAdminSubscription(id: number, payload: ExtendAdminSubscriptionRequest) {
+  return requestJson<AdminSubscriptionResponse>(adminPath(`/subscriptions/${id}/extend`), {
+    method: 'POST',
+    json: payload,
+  });
 }
 
 export function fetchAdminNodes(query: AdminNodesQuery = {}) {
@@ -120,6 +239,30 @@ export function createAdminPlan(payload: CreatePlanRequest) {
 
 export function updateAdminPlan(id: number, payload: UpdatePlanRequest) {
   return requestJson<PlanSummary>(adminPath(`/plans/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function fetchAdminPaymentChannels(query: AdminPaymentChannelsQuery = {}) {
+  return requestJson<PaginatedResponse<{ channels: PaymentChannelSummary[] }>>(
+    withQuery(adminPath('/payment-channels'), query),
+  );
+}
+
+export function fetchAdminPaymentChannelDetail(id: number) {
+  return requestJson<PaymentChannelResponse>(adminPath(`/payment-channels/${id}`));
+}
+
+export function createAdminPaymentChannel(payload: CreatePaymentChannelRequest) {
+  return requestJson<PaymentChannelResponse>(adminPath('/payment-channels'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminPaymentChannel(id: number, payload: UpdatePaymentChannelRequest) {
+  return requestJson<PaymentChannelResponse>(adminPath(`/payment-channels/${id}`), {
     method: 'PATCH',
     json: payload,
   });

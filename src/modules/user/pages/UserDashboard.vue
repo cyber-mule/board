@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,13 @@ const announcements = ref<UserAnnouncementSummary[]>([]);
 const orders = ref<OrderDetail[]>([]);
 const loading = ref(true);
 const errorMessage = ref('');
+
+const hasSubscription = computed(() => subscriptions.value.length > 0);
+const hasPendingPayment = computed(() => {
+  return orders.value.some(
+    (order) => order.status === 'pending_payment' || order.payment_status === 'pending',
+  );
+});
 
 const sectionLabels: Record<string, string> = {
   balance: '余额',
@@ -159,6 +166,48 @@ onMounted(() => {
       <AlertDescription>{{ errorMessage }}</AlertDescription>
     </Alert>
 
+    <Card class="panel-card--full">
+      <CardHeader>
+        <CardTitle>开通指引</CardTitle>
+        <p class="panel-card__meta">选套餐 → 支付 → 获取订阅</p>
+      </CardHeader>
+      <CardContent>
+        <div class="step-grid">
+          <div class="step-card">
+            <p class="step-card__title">1. 选择套餐</p>
+            <p class="step-card__desc">浏览套餐并创建订单。</p>
+            <RouterLink to="/user/plans" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                去选套餐
+              </Button>
+            </RouterLink>
+          </div>
+          <div class="step-card">
+            <p class="step-card__title">2. 支付订单</p>
+            <p class="step-card__desc">
+              {{ hasPendingPayment ? '存在待支付订单，请尽快完成支付。' : '查看订单状态与支付记录。' }}
+            </p>
+            <RouterLink to="/user/orders" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                查看订单
+              </Button>
+            </RouterLink>
+          </div>
+          <div class="step-card">
+            <p class="step-card__title">3. 获取订阅</p>
+            <p class="step-card__desc">
+              {{ hasSubscription ? '已有订阅，可前往管理模板。' : '完成支付后生成订阅。' }}
+            </p>
+            <RouterLink to="/user/subscriptions" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                管理订阅
+              </Button>
+            </RouterLink>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
     <div class="split-grid">
       <Card class="panel-card--full">
         <CardHeader class="cluster cluster--between cluster--center">
@@ -199,6 +248,13 @@ onMounted(() => {
               </li>
             </ul>
             <div v-else class="panel-card__empty">暂无交易记录。</div>
+            <div class="cluster">
+              <RouterLink to="/user/balance" custom v-slot="{ href, navigate }">
+                <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                  查看明细
+                </Button>
+              </RouterLink>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -210,9 +266,14 @@ onMounted(() => {
         </CardHeader>
         <CardContent>
           <p v-if="loading" class="panel-card__empty">正在加载订阅...</p>
-          <p v-else-if="subscriptions.length === 0" class="panel-card__empty">
-            暂无订阅。
-          </p>
+          <div v-else-if="subscriptions.length === 0" class="panel-card__empty stack">
+            <span>暂无订阅。</span>
+            <RouterLink to="/user/plans" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                去选套餐
+              </Button>
+            </RouterLink>
+          </div>
           <ul v-else class="data-list">
             <li v-for="subscription in subscriptions" :key="subscription.id" class="data-row">
               <div>
@@ -241,7 +302,7 @@ onMounted(() => {
         </CardHeader>
         <CardContent>
           <p v-if="loading" class="panel-card__empty">正在加载套餐...</p>
-          <p v-else-if="plans.length === 0" class="panel-card__empty">暂无套餐。</p>
+          <p v-else-if="plans.length === 0" class="panel-card__empty">暂无套餐，请稍后再试。</p>
           <ul v-else class="data-list">
             <li v-for="plan in plans.slice(0, 5)" :key="plan.id" class="data-row">
               <div>
@@ -291,7 +352,14 @@ onMounted(() => {
         </CardHeader>
         <CardContent>
           <p v-if="loading" class="panel-card__empty">正在加载订单...</p>
-          <p v-else-if="orders.length === 0" class="panel-card__empty">暂无订单。</p>
+          <div v-else-if="orders.length === 0" class="panel-card__empty stack">
+            <span>暂无订单。</span>
+            <RouterLink to="/user/plans" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">
+                创建订单
+              </Button>
+            </RouterLink>
+          </div>
           <ul v-else class="data-list data-list--compact">
             <li v-for="order in orders" :key="order.id" class="data-row">
               <div>
@@ -313,4 +381,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-

@@ -28,6 +28,116 @@ export type AdminDashboardResponse = {
   modules: AdminModule[];
 };
 
+export type AdminUserSummary = {
+  id: number;
+  email: string;
+  display_name: string;
+  roles: string[];
+  status: string;
+  email_verified_at?: number;
+  failed_login_attempts?: number;
+  locked_until?: number;
+  last_login_at?: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AdminUserResponse = {
+  user: AdminUserSummary;
+};
+
+export type CreateAdminUserRequest = {
+  email: string;
+  password: string;
+  display_name?: string;
+  roles?: string[];
+  status?: string;
+  email_verified?: boolean;
+};
+
+export type UpdateUserStatusRequest = {
+  status: string;
+};
+
+export type UpdateUserRolesRequest = {
+  roles: string[];
+};
+
+export type ResetUserPasswordRequest = {
+  password: string;
+};
+
+export type MessageResponse = {
+  message: string;
+};
+
+export type AdminSubscriptionUserSummary = {
+  id: number;
+  email: string;
+  display_name: string;
+};
+
+export type AdminSubscriptionSummary = {
+  id: number;
+  user?: AdminSubscriptionUserSummary;
+  name: string;
+  plan_name: string;
+  status?: string;
+  template_id?: number;
+  available_template_ids?: number[];
+  token?: string;
+  subscription_url?: string;
+  subscribe_url?: string;
+  expires_at?: number;
+  traffic_total_bytes?: number;
+  traffic_used_bytes?: number;
+  devices_limit?: number;
+  last_refreshed_at?: number;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type AdminSubscriptionResponse = {
+  subscription: AdminSubscriptionSummary;
+};
+
+export type CreateAdminSubscriptionRequest = {
+  user_id: number;
+  name: string;
+  plan_name: string;
+  status?: string;
+  template_id: number;
+  available_template_ids?: number[];
+  token?: string;
+  expires_at: number;
+  traffic_total_bytes: number;
+  traffic_used_bytes?: number;
+  devices_limit: number;
+};
+
+export type UpdateAdminSubscriptionRequest = {
+  name?: string;
+  plan_name?: string;
+  status?: string;
+  template_id?: number;
+  available_template_ids?: number[];
+  token?: string;
+  expires_at?: number;
+  traffic_total_bytes?: number;
+  traffic_used_bytes?: number;
+  devices_limit?: number;
+};
+
+export type DisableAdminSubscriptionRequest = {
+  reason?: string;
+};
+
+export type ExtendAdminSubscriptionRequest = {
+  extend_days?: number;
+  extend_hours?: number;
+  expires_at?: number;
+};
+
 export type NodeSummary = {
   id: number;
   name: string;
@@ -107,6 +217,40 @@ export type UpdatePlanRequest = {
   sort_order?: number;
   status?: string;
   visible?: boolean;
+};
+
+export type PaymentChannelSummary = {
+  id: number;
+  name: string;
+  code: string;
+  provider?: string;
+  enabled?: boolean;
+  sort_order?: number;
+  config?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type PaymentChannelResponse = {
+  channel: PaymentChannelSummary;
+};
+
+export type CreatePaymentChannelRequest = {
+  name: string;
+  code: string;
+  provider?: string;
+  enabled?: boolean;
+  sort_order?: number;
+  config?: Record<string, unknown>;
+};
+
+export type UpdatePaymentChannelRequest = {
+  name?: string;
+  code?: string;
+  provider?: string;
+  enabled?: boolean;
+  sort_order?: number;
+  config?: Record<string, unknown>;
 };
 
 export type AnnouncementSummary = {
@@ -350,6 +494,9 @@ export type UserSubscriptionSummary = {
   status?: string;
   template_id?: number;
   available_template_ids?: number[];
+  token?: string;
+  subscription_url?: string;
+  subscribe_url?: string;
   expires_at?: number;
   traffic_total_bytes?: number;
   traffic_used_bytes?: number;

@@ -30,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
+import RichTextEditor from '@/components/RichTextEditor.vue';
 import { adminApi } from '../../../api';
 import { formatDateTime } from '../../../utils/format';
 import type {
@@ -124,6 +124,29 @@ function audienceLabel(value?: string): string {
   }
 }
 
+function extractText(html?: string): string {
+  if (!html) {
+    return '';
+  }
+  if (typeof DOMParser === 'undefined') {
+    return html;
+  }
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent?.trim() ?? '';
+}
+
+function contentPreview(content?: string): string {
+  const text = extractText(content);
+  if (!text) {
+    return '';
+  }
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
+
+function hasContent(html?: string): boolean {
+  return extractText(html).length > 0;
+}
+
 async function loadAnnouncements() {
   loading.value = true;
   errorMessage.value = '';
@@ -196,7 +219,7 @@ function closeCreateModal() {
 }
 
 async function handleCreate() {
-  if (!createForm.title || !createForm.content) {
+  if (!createForm.title || !hasContent(createForm.content)) {
     errorMessage.value = '请填写标题与内容';
     return;
   }
@@ -247,6 +270,11 @@ async function handleUpdate() {
       ...editForm,
       category: editForm.category === '__unset__' ? undefined : editForm.category || undefined,
     };
+    if (!hasContent(payload.content)) {
+      errorMessage.value = '内容不能为空';
+      isSaving.value = false;
+      return;
+    }
     await adminApi.updateAdminAnnouncement(selectedAnnouncement.value.id, payload);
     closeEditModal();
     await loadAnnouncements();
@@ -404,7 +432,7 @@ onMounted(() => {
                   <div class="stack stack--tight">
                     <p class="font-medium">{{ announcement.title }}</p>
                     <p v-if="announcement.content" class="text-xs text-muted-foreground">
-                      {{ announcement.content.substring(0, 80) }}{{ announcement.content.length > 80 ? '...' : '' }}
+                      {{ contentPreview(announcement.content) }}
                     </p>
                   </div>
                 </TableCell>
@@ -476,13 +504,8 @@ onMounted(() => {
             <Input id="create-title" v-model="createForm.title" type="text" placeholder="公告标题" />
           </div>
           <div class="stack stack--tight">
-            <Label for="create-content">内容 *</Label>
-            <Textarea
-              id="create-content"
-              v-model="createForm.content"
-              rows="8"
-              placeholder="公告正文"
-            />
+            <Label>内容 *</Label>
+            <RichTextEditor v-model="createForm.content" placeholder="公告正文" />
           </div>
           <div class="form-grid">
             <div class="stack stack--tight">
@@ -550,8 +573,8 @@ onMounted(() => {
             <Input id="edit-title" v-model="editForm.title" type="text" placeholder="公告标题" />
           </div>
           <div class="stack stack--tight">
-            <Label for="edit-content">内容</Label>
-            <Textarea id="edit-content" v-model="editForm.content" rows="8" placeholder="公告正文" />
+            <Label>内容</Label>
+            <RichTextEditor v-model="editForm.content" placeholder="公告正文" />
           </div>
           <div class="form-grid">
             <div class="stack stack--tight">
@@ -635,4 +658,3 @@ onMounted(() => {
     </Dialog>
   </div>
 </template>
-
