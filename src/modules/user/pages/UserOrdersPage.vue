@@ -33,6 +33,8 @@ const isLoadingMore = ref(false);
 const errorMessage = ref('');
 const actionMessage = ref('');
 const actionError = ref('');
+const paymentStatusLoading = ref(false);
+const paymentStatusError = ref('');
 const perPage = 10;
 const page = ref(1);
 const pagination = ref<PaginationMeta | null>(null);
@@ -251,6 +253,11 @@ const isCanceling = ref(false);
 const autoRefresh = ref(false);
 let autoRefreshTimer: number | null = null;
 const copyMessage = ref('');
+const showPaymentQr = ref(false);
+const paymentQrUrl = ref('');
+const paymentQrSource = ref('');
+const paymentQrError = ref('');
+const paymentQrLoading = ref(false);
 
 const isPendingDetail = computed(() => {
   const status = detail.value?.order.status;
@@ -313,6 +320,92 @@ function statusLabel(value?: string) {
 
 function canCancel(order: OrderDetail): boolean {
   return order.status === 'pending_payment' || order.payment_status === 'pending';
+}
+
+function normalizePaymentMeta(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPaymentMeta(order?: OrderDetail | null) {
+  if (!order?.payments?.length) {
+    return { payUrl: '', qrCode: '', provider: '' };
+  }
+  const sorted = [...order.payments].sort(
+    (a, b) => (b.updated_at ?? b.created_at) - (a.updated_at ?? a.created_at),
+  );
+  for (const payment of sorted) {
+    const metadata = payment.metadata ?? {};
+    const payUrl = normalizePaymentMeta(metadata.pay_url);
+    const qrCode = normalizePaymentMeta(metadata.qr_code);
+    if (payUrl || qrCode) {
+      return {
+        payUrl,
+        qrCode,
+        provider: payment.provider || payment.method || '',
+      };
+    }
+  }
+  return { payUrl: '', qrCode: '', provider: '' };
+}
+
+const selectedPaymentMeta = computed(() => getPaymentMeta(detail.value?.order ?? null));
+
+const paymentQrValue = computed(() => {
+  return selectedPaymentMeta.value.qrCode || selectedPaymentMeta.value.payUrl || '';
+});
+
+function isImageSource(value: string) {
+  return value.startsWith('data:image') || value.startsWith('http://') || value.startsWith('https://');
+}
+
+async function loadPaymentQr(value: string) {
+  paymentQrLoading.value = true;
+  paymentQrError.value = '';
+
+  try {
+    if (isImageSource(value)) {
+      paymentQrUrl.value = value;
+      paymentQrSource.value = value;
+      return;
+    }
+    const module = await import(
+      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'
+    );
+    const api = module.toDataURL ? module : module.default;
+    if (!api?.toDataURL) {
+      throw new Error('QRCode module missing toDataURL');
+    }
+    paymentQrUrl.value = await api.toDataURL(value, { width: 180, margin: 1 });
+    paymentQrSource.value = value;
+  } catch (error) {
+    paymentQrUrl.value = '';
+    paymentQrError.value = '二维码生成失败，请稍后重试。';
+  } finally {
+    paymentQrLoading.value = false;
+  }
+}
+
+async function togglePaymentQr() {
+  paymentQrError.value = '';
+  const value = paymentQrValue.value;
+  if (!value) {
+    paymentQrError.value = '二维码不可用。';
+    return;
+  }
+  showPaymentQr.value = !showPaymentQr.value;
+  if (showPaymentQr.value) {
+    if (!paymentQrUrl.value || paymentQrSource.value !== value) {
+      await loadPaymentQr(value);
+    }
+  }
+}
+
+function resetPaymentQr() {
+  showPaymentQr.value = false;
+  paymentQrUrl.value = '';
+  paymentQrSource.value = '';
+  paymentQrError.value = '';
+  paymentQrLoading.value = false;
 }
 
 async function loadOrders(
@@ -473,6 +566,61 @@ async function refreshDetail(silent = false) {
   }
 }
 
+async function refreshPaymentStatus(silent = false) {
+  if (!selectedOrderId.value) {
+    return;
+  }
+
+  if (!silent) {
+    paymentStatusLoading.value = true;
+    paymentStatusError.value = '';
+  }
+
+  try {
+    const response = await userApi.fetchUserOrderPaymentStatus(selectedOrderId.value);
+    if (detail.value) {
+      detail.value.order = {
+        ...detail.value.order,
+        status: response.status,
+        payment_status: response.payment_status,
+        payment_method: response.payment_method ?? detail.value.order.payment_method,
+        payment_intent_id: response.payment_intent_id ?? detail.value.order.payment_intent_id,
+        payment_reference: response.payment_reference ?? detail.value.order.payment_reference,
+        payment_failure_code: response.payment_failure_code ?? detail.value.order.payment_failure_code,
+        payment_failure_message: response.payment_failure_message ?? detail.value.order.payment_failure_message,
+        paid_at: response.paid_at ?? detail.value.order.paid_at,
+        cancelled_at: response.cancelled_at ?? detail.value.order.cancelled_at,
+        refunded_cents: response.refunded_cents ?? detail.value.order.refunded_cents,
+        refunded_at: response.refunded_at ?? detail.value.order.refunded_at,
+        updated_at: response.updated_at ?? detail.value.order.updated_at,
+      };
+    }
+    orders.value = orders.value.map((order) =>
+      order.id === response.order_id
+        ? {
+            ...order,
+            status: response.status,
+            payment_status: response.payment_status,
+            payment_method: response.payment_method ?? order.payment_method,
+            updated_at: response.updated_at ?? order.updated_at,
+          }
+        : order,
+    );
+    if (detail.value && !isPendingDetail.value) {
+      void refreshDetail(true);
+    }
+  } catch (error) {
+    if (!silent) {
+      paymentStatusError.value =
+        error instanceof Error ? error.message : '刷新支付状态失败';
+    }
+  } finally {
+    if (!silent) {
+      paymentStatusLoading.value = false;
+    }
+  }
+}
+
 async function copyText(label: string, text?: string) {
   copyMessage.value = '';
   if (!text) {
@@ -492,6 +640,8 @@ async function openDetails(order: OrderDetail, scrollToDetail = false) {
   selectedOrderId.value = order.id;
   detail.value = null;
   copyMessage.value = '';
+  paymentStatusError.value = '';
+  resetPaymentQr();
   await refreshDetail();
 
   if (scrollToDetail) {
@@ -509,7 +659,7 @@ function startAutoRefresh() {
       autoRefresh.value = false;
       return;
     }
-    void refreshDetail(true);
+    void refreshPaymentStatus(true);
   }, 8000);
 }
 
@@ -740,6 +890,21 @@ onBeforeUnmount(() => {
               <Button variant="ghost" size="sm" type="button" @click="openDetails(order, true)">
                 详情
               </Button>
+              <div v-if="canCancel(order) && order.payment_method === 'external'" class="cluster cluster--center">
+                <Button
+                  v-if="getPaymentMeta(order).payUrl"
+                  :as="'a'"
+                  :href="getPaymentMeta(order).payUrl"
+                  size="sm"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  去支付
+                </Button>
+                <Button v-else size="sm" type="button" @click="openDetails(order, true)">
+                  去支付
+                </Button>
+              </div>
               <div v-if="canCancel(order)" class="cluster cluster--center">
                 <Button size="sm" type="button" @click="openCancelModal(order)">
                   取消订单
@@ -797,6 +962,14 @@ onBeforeUnmount(() => {
           >
             刷新详情
           </Button>
+          <Button
+            variant="ghost"
+            type="button"
+            @click="refreshPaymentStatus()"
+            :disabled="paymentStatusLoading || !selectedOrderId"
+          >
+            {{ paymentStatusLoading ? '刷新中...' : '刷新支付状态' }}
+          </Button>
           <div class="cluster cluster--center">
             <Switch v-model:checked="autoRefresh" :disabled="!selectedOrderId || !isPendingDetail" />
             <span class="text-sm text-muted-foreground">自动刷新待支付</span>
@@ -808,6 +981,10 @@ onBeforeUnmount(() => {
         <p v-else-if="detailError" class="panel-card__empty">{{ detailError }}</p>
         <p v-else-if="!detail" class="panel-card__empty">请选择订单查看详情。</p>
         <div v-else class="stack stack--loose">
+          <Alert v-if="paymentStatusError" variant="destructive">
+            <AlertTitle>支付状态刷新失败</AlertTitle>
+            <AlertDescription>{{ paymentStatusError }}</AlertDescription>
+          </Alert>
           <div class="detail-grid">
             <div>
               <p class="detail-label">订单状态</p>
@@ -862,6 +1039,14 @@ onBeforeUnmount(() => {
             <AlertDescription>{{ copyMessage }}</AlertDescription>
           </Alert>
 
+          <Alert
+            v-if="detail.order.payment_method === 'manual' && isPendingDetail"
+            class="border-amber-200 bg-amber-50 text-amber-800"
+          >
+            <AlertTitle>线下支付待确认</AlertTitle>
+            <AlertDescription>已提交线下支付订单，请联系管理员完成确认。</AlertDescription>
+          </Alert>
+
           <div v-if="detail.balance" class="detail-grid">
             <div>
               <p class="detail-label">账户余额</p>
@@ -882,12 +1067,68 @@ onBeforeUnmount(() => {
                 <p class="detail-label">支付参考号</p>
                 <p class="detail-value">{{ detail.order.payment_reference }}</p>
               </div>
+              <div v-if="detail.order.payment_failure_code">
+                <p class="detail-label">失败代码</p>
+                <p class="detail-value">{{ detail.order.payment_failure_code }}</p>
+              </div>
               <div v-if="detail.order.payment_failure_message">
                 <p class="detail-label">失败原因</p>
                 <p class="detail-value">{{ detail.order.payment_failure_message }}</p>
               </div>
             </div>
           </div>
+
+          <div v-if="selectedPaymentMeta.payUrl || selectedPaymentMeta.qrCode" class="detail-section">
+            <h4>支付入口</h4>
+            <div class="cluster">
+              <Button
+                v-if="selectedPaymentMeta.payUrl"
+                :as="'a'"
+                :href="selectedPaymentMeta.payUrl"
+                target="_blank"
+                rel="noopener"
+              >
+                去支付
+              </Button>
+              <Button variant="ghost" size="sm" type="button" @click="togglePaymentQr">
+                {{ showPaymentQr ? '收起二维码' : '显示二维码' }}
+              </Button>
+              <Button
+                v-if="selectedPaymentMeta.payUrl"
+                variant="ghost"
+                size="sm"
+                type="button"
+                @click="copyText('支付链接', selectedPaymentMeta.payUrl)"
+              >
+                复制支付链接
+              </Button>
+              <Button
+                v-if="selectedPaymentMeta.qrCode"
+                variant="ghost"
+                size="sm"
+                type="button"
+                @click="copyText('二维码内容', selectedPaymentMeta.qrCode)"
+              >
+                复制二维码内容
+              </Button>
+            </div>
+            <div v-if="showPaymentQr" class="qr-panel">
+              <p v-if="paymentQrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
+              <img v-else-if="paymentQrUrl" :src="paymentQrUrl" alt="支付二维码" class="qr-image" />
+              <p v-else class="text-xs text-muted-foreground">
+                {{ paymentQrError || '二维码不可用。' }}
+              </p>
+            </div>
+          </div>
+          <p
+            v-else-if="
+              detail.order.payment_method === 'external' &&
+              isPendingDetail
+            "
+            class="text-xs text-muted-foreground"
+          >
+            支付链接生成中，可点击刷新支付状态或稍后再试。
+          </p>
 
           <div class="detail-section">
             <h4>商品明细</h4>

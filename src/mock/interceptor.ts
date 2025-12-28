@@ -553,6 +553,18 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/user/payment-channels`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const provider = parsedUrl?.searchParams.get('provider');
+      const enabledChannels = mockPaymentChannels.filter((channel) => channel.enabled);
+      const channels = provider
+        ? enabledChannels.filter((channel) => channel.provider === provider)
+        : enabledChannels;
+      return mockResponse({ channels });
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/user/orders`)) {
     if (method === 'GET' && currentUser) {
       const userOrders = mockOrders.filter((o) => o.user_id === currentUser.id);
@@ -564,11 +576,21 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
 
     if (method === 'POST' && currentUser) {
-      const payload = body as { plan_id?: number; quantity?: number; payment_method?: string };
+      const payload = body as {
+        plan_id?: number;
+        quantity?: number;
+        payment_method?: string;
+        payment_channel?: string;
+      };
       const plan = mockPlans.find((p) => p.id === payload.plan_id) ?? mockPlans[0];
       const quantity = payload.quantity && payload.quantity > 0 ? payload.quantity : 1;
       const totalCents = (plan?.price_cents ?? 0) * quantity;
       const orderId = generateId();
+      const paymentMethod = payload.payment_method ?? 'balance';
+      const channel = mockPaymentChannels.find((item) => item.code === payload.payment_channel);
+      const isExternal = paymentMethod === 'external' && totalCents > 0;
+      const isBalance = paymentMethod === 'balance' || totalCents === 0;
+      const isManual = paymentMethod === 'manual';
       const order: AdminOrderDetail = {
         id: orderId,
         number: generateOrderNumber(),
@@ -576,13 +598,15 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         user: currentUser,
         plan_id: plan?.id,
         plan,
-        status: 'pending_payment',
-        payment_status: 'pending',
-        payment_method: payload.payment_method,
+        status: isBalance ? 'paid' : 'pending_payment',
+        payment_status: isBalance ? 'succeeded' : 'pending',
+        payment_method: paymentMethod,
         total_cents: totalCents,
         currency: plan?.currency ?? 'USD',
         created_at: Date.now(),
         updated_at: Date.now(),
+        payment_intent_id: isExternal ? `intent_${orderId}` : undefined,
+        paid_at: isBalance ? Date.now() : undefined,
         items: [
           {
             id: generateId(),
@@ -597,7 +621,49 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             created_at: Date.now(),
           },
         ],
-        payments: [],
+        payments: isBalance
+          ? [
+              {
+                id: generateId(),
+                order_id: orderId,
+                method: paymentMethod,
+                status: 'succeeded',
+                amount_cents: totalCents,
+                currency: plan?.currency ?? 'USD',
+                created_at: Date.now(),
+              },
+            ]
+          : isExternal
+            ? [
+                {
+                  id: generateId(),
+                  order_id: orderId,
+                  provider: channel?.provider,
+                  method: paymentMethod,
+                  intent_id: `intent_${orderId}`,
+                  status: 'pending',
+                  amount_cents: totalCents,
+                  currency: plan?.currency ?? 'USD',
+                  metadata: {
+                    pay_url: `https://example.com/pay/${orderId}`,
+                    qr_code: `https://example.com/qr/${orderId}.png`,
+                  },
+                  created_at: Date.now(),
+                },
+              ]
+            : isManual
+              ? [
+                  {
+                    id: generateId(),
+                    order_id: orderId,
+                    method: paymentMethod,
+                    status: 'pending',
+                    amount_cents: totalCents,
+                    currency: plan?.currency ?? 'USD',
+                    created_at: Date.now(),
+                  },
+                ]
+              : [],
         refunds: [],
       };
 
@@ -616,6 +682,29 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       const order = mockOrders.find((o) => o.id === id && o.user_id === currentUser.id);
       if (!order) return mockError('Order not found', 404);
       return mockResponse({ order, balance: buildBalanceSnapshot(currentUser) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/orders/{id}/payment-status`)) {
+    if (method === 'GET' && currentUser) {
+      const id = extractId(url, `${API_PREFIX}/user/orders/{id}/payment-status`);
+      const order = mockOrders.find((o) => o.id === id && o.user_id === currentUser.id);
+      if (!order) return mockError('Order not found', 404);
+      return mockResponse({
+        order_id: order.id,
+        status: order.status,
+        payment_status: order.payment_status,
+        payment_method: order.payment_method,
+        payment_intent_id: order.payment_intent_id,
+        payment_reference: order.payment_reference,
+        payment_failure_code: order.payment_failure_code,
+        payment_failure_message: order.payment_failure_message,
+        paid_at: order.paid_at,
+        cancelled_at: order.cancelled_at,
+        refunded_cents: order.refunded_cents ?? 0,
+        refunded_at: order.refunded_at,
+        updated_at: order.updated_at ?? order.created_at,
+      });
     }
   }
 

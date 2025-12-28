@@ -580,6 +580,7 @@ export type CreateUserOrderRequest = {
   payment_channel?: string;
   payment_return_url?: string;
   idempotency_key?: string;
+  coupon_code?: string;
 };
 
 export type CreateUserOrderResponse = {
@@ -597,4 +598,24 @@ export type UserOrderDetailResponse = {
   order: OrderDetail;
   balance?: BalanceSnapshot;
   transaction?: BalanceTransactionSummary;
+};
+
+export type UserPaymentChannelsResponse = {
+  channels: PaymentChannelSummary[];
+};
+
+export type UserOrderPaymentStatusResponse = {
+  order_id: number;
+  status: string;
+  payment_status: string;
+  payment_method?: string;
+  payment_intent_id?: string;
+  payment_reference?: string;
+  payment_failure_code?: string;
+  payment_failure_message?: string;
+  paid_at?: number;
+  cancelled_at?: number;
+  refunded_cents?: number;
+  refunded_at?: number;
+  updated_at?: number;
 };

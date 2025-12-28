@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select';
 import { userApi } from '../../../api';
 import { formatBytes, formatCurrency } from '../../../utils/format';
-import type { CreateUserOrderResponse, UserPlanSummary } from '../../../api/types';
+import type { CreateUserOrderResponse, OrderDetail, PaymentChannelSummary, UserPlanSummary } from '../../../api/types';
 
 const plans = ref<UserPlanSummary[]>([]);
 const loading = ref(true);
@@ -25,6 +25,14 @@ const orderMessage = ref('');
 const orderLoading = ref(false);
 const orderResult = ref<CreateUserOrderResponse | null>(null);
 const orderFormRef = ref<HTMLElement | null>(null);
+const paymentChannels = ref<PaymentChannelSummary[]>([]);
+const channelsLoading = ref(false);
+const channelsError = ref('');
+const showPaymentQr = ref(false);
+const paymentQrUrl = ref('');
+const paymentQrSource = ref('');
+const paymentQrError = ref('');
+const paymentQrLoading = ref(false);
 
 const filters = reactive({
   q: '',
@@ -37,6 +45,9 @@ const orderForm = reactive({
   plan_id: 0,
   quantity: 1,
   payment_method: 'balance',
+  payment_channel: '',
+  payment_return_url: '',
+  coupon_code: '',
 });
 
 const selectedPlan = computed(() => {
@@ -129,6 +140,14 @@ const totalCents = computed(() => {
   return selectedPlan.value.price_cents * quantity;
 });
 
+const orderPaymentMeta = computed(() => {
+  return getPaymentMeta(orderResult.value?.order ?? null);
+});
+
+const paymentQrValue = computed(() => {
+  return orderPaymentMeta.value.qrCode || orderPaymentMeta.value.payUrl || '';
+});
+
 function createIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -150,6 +169,32 @@ async function loadPlans() {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadPaymentChannels() {
+  channelsLoading.value = true;
+  channelsError.value = '';
+
+  try {
+    const response = await userApi.fetchUserPaymentChannels();
+    paymentChannels.value = response.channels ?? [];
+  } catch (error) {
+    channelsError.value = error instanceof Error ? error.message : '加载支付通道失败';
+  } finally {
+    channelsLoading.value = false;
+  }
+}
+
+function ensurePaymentChannel() {
+  if (orderForm.payment_method !== 'external') {
+    orderForm.payment_channel = '';
+    return;
+  }
+  if (orderForm.payment_channel) {
+    return;
+  }
+  const firstChannel = paymentChannels.value[0];
+  orderForm.payment_channel = firstChannel?.code ?? '';
 }
 
 function selectPlan(plan: UserPlanSummary) {
@@ -196,14 +241,33 @@ async function submitOrder() {
   }
 
   try {
-    const response = await userApi.createUserOrder({
+    if (orderForm.payment_method === 'external' && !orderForm.payment_channel) {
+      orderError.value = '请选择可用的支付通道。';
+      orderLoading.value = false;
+      return;
+    }
+
+    const payload = {
       plan_id: orderForm.plan_id,
       quantity: normalizedQuantity,
       payment_method: orderForm.payment_method,
       idempotency_key: createIdempotencyKey(),
-    });
+      payment_channel:
+        orderForm.payment_method === 'external' && orderForm.payment_channel
+          ? orderForm.payment_channel
+          : undefined,
+      payment_return_url:
+        orderForm.payment_method === 'external' && orderForm.payment_return_url
+          ? orderForm.payment_return_url
+          : undefined,
+      coupon_code: orderForm.coupon_code ? orderForm.coupon_code.trim() : undefined,
+    };
+    const response = await userApi.createUserOrder(payload);
     orderResult.value = response;
-    orderMessage.value = `订单 #${response.order.number} 创建成功。`;
+    orderMessage.value =
+      response.order.status === 'pending_payment'
+        ? `订单 #${response.order.number} 创建成功，请完成支付。`
+        : `订单 #${response.order.number} 创建成功。`;
   } catch (error) {
     orderError.value = error instanceof Error ? error.message : '创建订单失败';
   } finally {
@@ -211,8 +275,92 @@ async function submitOrder() {
   }
 }
 
+function normalizePaymentMeta(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPaymentMeta(order: OrderDetail | null) {
+  if (!order?.payments?.length) {
+    return { payUrl: '', qrCode: '', provider: '' };
+  }
+  const sorted = [...order.payments].sort(
+    (a, b) => (b.updated_at ?? b.created_at) - (a.updated_at ?? a.created_at),
+  );
+  for (const payment of sorted) {
+    const metadata = payment.metadata ?? {};
+    const payUrl = normalizePaymentMeta(metadata.pay_url);
+    const qrCode = normalizePaymentMeta(metadata.qr_code);
+    if (payUrl || qrCode) {
+      return {
+        payUrl,
+        qrCode,
+        provider: payment.provider || payment.method || '',
+      };
+    }
+  }
+  return { payUrl: '', qrCode: '', provider: '' };
+}
+
+function isImageSource(value: string) {
+  return value.startsWith('data:image') || value.startsWith('http://') || value.startsWith('https://');
+}
+
+async function loadPaymentQr(value: string) {
+  paymentQrLoading.value = true;
+  paymentQrError.value = '';
+
+  try {
+    if (isImageSource(value)) {
+      paymentQrUrl.value = value;
+      paymentQrSource.value = value;
+      return;
+    }
+    const module = await import(
+      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'
+    );
+    const api = module.toDataURL ? module : module.default;
+    if (!api?.toDataURL) {
+      throw new Error('QRCode module missing toDataURL');
+    }
+    paymentQrUrl.value = await api.toDataURL(value, { width: 180, margin: 1 });
+    paymentQrSource.value = value;
+  } catch (error) {
+    paymentQrUrl.value = '';
+    paymentQrError.value = '二维码生成失败，请稍后重试。';
+  } finally {
+    paymentQrLoading.value = false;
+  }
+}
+
+async function togglePaymentQr() {
+  paymentQrError.value = '';
+  const value = paymentQrValue.value;
+  if (!value) {
+    paymentQrError.value = '二维码不可用。';
+    return;
+  }
+  showPaymentQr.value = !showPaymentQr.value;
+  if (showPaymentQr.value) {
+    if (!paymentQrUrl.value || paymentQrSource.value !== value) {
+      await loadPaymentQr(value);
+    }
+  }
+}
+
+function resetPaymentQr() {
+  showPaymentQr.value = false;
+  paymentQrUrl.value = '';
+  paymentQrSource.value = '';
+  paymentQrError.value = '';
+  paymentQrLoading.value = false;
+}
+
 onMounted(() => {
   void loadPlans();
+  void loadPaymentChannels();
+  if (typeof window !== 'undefined' && !orderForm.payment_return_url) {
+    orderForm.payment_return_url = `${window.location.origin}/user/orders`;
+  }
 });
 
 watch(
@@ -222,6 +370,21 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => orderForm.payment_method,
+  () => {
+    ensurePaymentChannel();
+  },
+);
+
+watch(paymentChannels, () => {
+  ensurePaymentChannel();
+});
+
+watch(orderResult, () => {
+  resetPaymentQr();
+});
 </script>
 
 <template>
@@ -344,6 +507,10 @@ watch(
                 <Input v-model.number="orderForm.quantity" type="number" min="1" />
               </div>
               <div class="stack stack--tight">
+                <Label>优惠码</Label>
+                <Input v-model="orderForm.coupon_code" type="text" placeholder="可选，支持折扣券" />
+              </div>
+              <div class="stack stack--tight">
                 <Label>支付方式</Label>
                 <Select v-model="orderForm.payment_method">
                   <SelectTrigger>
@@ -352,12 +519,48 @@ watch(
                   <SelectContent>
                     <SelectItem value="balance">余额</SelectItem>
                     <SelectItem value="external">外部</SelectItem>
+                    <SelectItem value="manual">线下</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
+                <Label>支付通道</Label>
+                <Select
+                  v-model="orderForm.payment_channel"
+                  :disabled="channelsLoading || paymentChannels.length === 0"
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择支付通道" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="channel in paymentChannels"
+                      :key="channel.id"
+                      :value="channel.code"
+                    >
+                      {{ channel.name }}{{ channel.provider ? ` · ${channel.provider}` : '' }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p v-if="channelsLoading" class="text-xs text-muted-foreground">正在加载支付通道...</p>
+                <p v-else-if="paymentChannels.length === 0" class="text-xs text-muted-foreground">
+                  暂无可用支付通道。
+                </p>
+              </div>
+              <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
+                <Label>支付回跳</Label>
+                <Input v-model="orderForm.payment_return_url" type="url" placeholder="https://..." />
               </div>
               <p v-if="orderForm.payment_method === 'external'" class="text-xs text-muted-foreground">
                 外部支付会创建待支付订单，支付完成后自动跳转。
               </p>
+              <p v-if="orderForm.payment_method === 'manual'" class="text-xs text-muted-foreground">
+                线下支付会创建待支付订单，需要管理员确认到账。
+              </p>
+              <Alert v-if="channelsError" variant="destructive">
+                <AlertTitle>支付通道加载失败</AlertTitle>
+                <AlertDescription>{{ channelsError }}</AlertDescription>
+              </Alert>
               <Button type="submit" :disabled="orderLoading">
                 {{ orderLoading ? '提交中...' : '创建订单' }}
               </Button>
@@ -454,6 +657,49 @@ watch(
           <div v-if="orderResult.order.payment_intent_id" class="panel-card__empty">
             支付意向：{{ orderResult.order.payment_intent_id }}
           </div>
+          <Alert
+            v-if="orderResult.order.payment_method === 'manual' && orderResult.order.status === 'pending_payment'"
+            class="border-amber-200 bg-amber-50 text-amber-800"
+          >
+            <AlertTitle>线下支付待确认</AlertTitle>
+            <AlertDescription>已创建线下支付订单，请联系管理员完成确认。</AlertDescription>
+          </Alert>
+          <div
+            v-if="orderPaymentMeta.payUrl || orderPaymentMeta.qrCode"
+            class="detail-section"
+          >
+            <h4>支付入口</h4>
+            <div class="cluster">
+              <Button
+                v-if="orderPaymentMeta.payUrl"
+                :as="'a'"
+                :href="orderPaymentMeta.payUrl"
+                target="_blank"
+                rel="noopener"
+              >
+                去支付
+              </Button>
+              <Button variant="ghost" size="sm" type="button" @click="togglePaymentQr">
+                {{ showPaymentQr ? '收起二维码' : '显示二维码' }}
+              </Button>
+            </div>
+            <div v-if="showPaymentQr" class="qr-panel">
+              <p v-if="paymentQrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
+              <img v-else-if="paymentQrUrl" :src="paymentQrUrl" alt="支付二维码" class="qr-image" />
+              <p v-else class="text-xs text-muted-foreground">
+                {{ paymentQrError || '二维码不可用。' }}
+              </p>
+            </div>
+          </div>
+          <p
+            v-else-if="
+              orderResult.order.payment_method === 'external' &&
+              orderResult.order.status === 'pending_payment'
+            "
+            class="text-xs text-muted-foreground"
+          >
+            支付链接生成中，可前往订单页刷新查看。
+          </p>
           <div class="cluster">
             <RouterLink to="/user/orders" custom v-slot="{ href, navigate }">
               <Button :as="'a'" :href="href" size="sm" variant="secondary" @click="navigate">

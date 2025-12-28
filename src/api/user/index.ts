@@ -8,6 +8,8 @@ import type {
   OrderDetail,
   PaginationMeta,
   UserOrderDetailResponse,
+  UserOrderPaymentStatusResponse,
+  UserPaymentChannelsResponse,
   UserAnnouncementSummary,
   UserBalanceResponse,
   UserPlanSummary,
@@ -31,6 +33,10 @@ type UserSubscriptionsQuery = PaginationQuery & {
 type UserAnnouncementsQuery = {
   audience?: string;
   limit?: number;
+};
+
+type UserPaymentChannelsQuery = {
+  provider?: string;
 };
 
 type UserOrdersQuery = PaginationQuery & {
@@ -65,6 +71,12 @@ export function fetchUserPlans(query: { q?: string } = {}) {
 export function fetchUserAnnouncements(query: UserAnnouncementsQuery = {}) {
   return requestJson<{ announcements: UserAnnouncementSummary[] }>(
     withQuery(userPath('/announcements'), query),
+  );
+}
+
+export function fetchUserPaymentChannels(query: UserPaymentChannelsQuery = {}) {
+  return requestJson<UserPaymentChannelsResponse>(
+    withQuery(userPath('/payment-channels'), query),
   );
 }
 
@@ -111,4 +123,8 @@ export function cancelUserOrder(id: number, reason?: string) {
 
 export function fetchUserOrderDetail(id: number) {
   return requestJson<UserOrderDetailResponse>(userPath(`/orders/${id}`));
+}
+
+export function fetchUserOrderPaymentStatus(id: number) {
+  return requestJson<UserOrderPaymentStatusResponse>(userPath(`/orders/${id}/payment-status`));
 }
