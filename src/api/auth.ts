@@ -7,7 +7,14 @@ import {
   setRole,
 } from '../auth/tokens';
 import { USE_MOCK, mockFetch } from '../mock';
-import type { AuthenticatedUser } from './types';
+import type {
+  AuthenticatedUser,
+  ForgotPasswordRequest,
+  MessageResponse,
+  RegisterRequest,
+  ResetPasswordRequest,
+  VerifyRequest,
+} from './types';
 
 export type AuthTokens = {
   accessToken: string;
@@ -23,6 +30,7 @@ type AuthResponse = {
   refreshToken?: string;
   role?: string;
   user?: AuthenticatedUser;
+  requires_verification?: boolean;
 };
 
 function deriveRole(role?: string, user?: AuthenticatedUser): string | undefined {
@@ -74,6 +82,9 @@ async function parseErrorMessage(response: Response, fallback: string): Promise<
       const parsed = JSON.parse(text) as { message?: string };
       if (parsed && typeof parsed.message === 'string') {
         return parsed.message;
+      }
+      if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+        return (parsed as { error?: string }).error as string;
       }
     } catch (error) {
       return text;
@@ -129,4 +140,88 @@ export async function refreshTokens(): Promise<AuthTokens> {
   const tokens = normalizeAuthResponse(data);
   applyTokens(tokens);
   return tokens;
+}
+
+export type RegisterResult = {
+  requires_verification: boolean;
+  tokens?: AuthTokens;
+  user?: AuthenticatedUser;
+};
+
+export async function registerAccount(payload: RegisterRequest): Promise<RegisterResult> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/register')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorMessage(response, `Register failed (${response.status})`);
+    throw new Error(message);
+  }
+
+  const data = (await response.json()) as AuthResponse;
+  const requiresVerification = Boolean(data.requires_verification);
+  if (!requiresVerification) {
+    const tokens = normalizeAuthResponse(data);
+    applyTokens(tokens);
+    return { requires_verification: false, tokens, user: tokens.user ?? data.user };
+  }
+  return { requires_verification: true, user: data.user };
+}
+
+export async function verifyEmail(payload: VerifyRequest): Promise<AuthTokens> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/verify')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorMessage(response, `Verify failed (${response.status})`);
+    throw new Error(message);
+  }
+
+  const data = (await response.json()) as AuthResponse;
+  const tokens = normalizeAuthResponse(data);
+  applyTokens(tokens);
+  return tokens;
+}
+
+export async function requestPasswordReset(payload: ForgotPasswordRequest): Promise<MessageResponse> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/forgot')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorMessage(response, `Reset request failed (${response.status})`);
+    throw new Error(message);
+  }
+
+  return (await response.json()) as MessageResponse;
+}
+
+export async function resetPassword(payload: ResetPasswordRequest): Promise<MessageResponse> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/reset')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorMessage(response, `Password reset failed (${response.status})`);
+    throw new Error(message);
+  }
+
+  return (await response.json()) as MessageResponse;
 }

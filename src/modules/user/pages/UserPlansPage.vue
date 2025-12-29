@@ -26,14 +26,34 @@ const orderLoading = ref(false);
 const orderResult = ref<CreateUserOrderResponse | null>(null);
 const orderFormRef = ref<HTMLElement | null>(null);
 const paymentChannels = ref<PaymentChannelSummary[]>([]);
+const paymentMethods = ref<string[]>([]);
 const channelsLoading = ref(false);
 const channelsError = ref('');
+const methodsLoaded = ref(false);
 const showPaymentQr = ref(false);
 const paymentQrUrl = ref('');
 const paymentQrSource = ref('');
 const paymentQrError = ref('');
 const paymentQrLoading = ref(false);
 
+const paymentMethodLabels: Record<string, string> = {
+  balance: '余额',
+  external: '外部',
+  manual: '线下',
+};
+
+const availablePaymentMethods = computed(() => {
+  if (!paymentMethods.value.length) {
+    return [];
+  }
+  return paymentMethods.value;
+});
+
+const hasExternalMethod = computed(() => availablePaymentMethods.value.includes('external'));
+
+const externalPaymentEnabled = computed(() => {
+  return availablePaymentMethods.value.includes('external') && paymentChannels.value.length > 0;
+});
 const filters = reactive({
   q: '',
   tag: '',
@@ -44,7 +64,7 @@ const filters = reactive({
 const orderForm = reactive({
   plan_id: 0,
   quantity: 1,
-  payment_method: 'balance',
+  payment_method: '',
   payment_channel: '',
   payment_return_url: '',
   coupon_code: '',
@@ -174,18 +194,62 @@ async function loadPlans() {
 async function loadPaymentChannels() {
   channelsLoading.value = true;
   channelsError.value = '';
+  methodsLoaded.value = false;
 
   try {
     const response = await userApi.fetchUserPaymentChannels();
     paymentChannels.value = response.channels ?? [];
+    const methods = Array.isArray(response.payment_methods) ? response.payment_methods : [];
+    const uniqueMethods = new Set<string>();
+    methods.forEach((method) => {
+      if (typeof method !== 'string') {
+        return;
+      }
+      const normalized = method.trim();
+      if (!normalized || uniqueMethods.has(normalized)) {
+        return;
+      }
+      uniqueMethods.add(normalized);
+    });
+    paymentMethods.value = Array.from(uniqueMethods);
   } catch (error) {
     channelsError.value = error instanceof Error ? error.message : '加载支付通道失败';
+    paymentMethods.value = [];
   } finally {
     channelsLoading.value = false;
+    methodsLoaded.value = true;
+  }
+}
+
+function paymentMethodLabel(method: string) {
+  return paymentMethodLabels[method] ?? method;
+}
+
+function resolveAvailableMethods() {
+  const methods = availablePaymentMethods.value.filter((method) => {
+    if (method === 'external' && !externalPaymentEnabled.value) {
+      return false;
+    }
+    return true;
+  });
+  return methods;
+}
+
+function ensurePaymentMethod() {
+  const methods = resolveAvailableMethods();
+  if (!methods.length) {
+    orderForm.payment_method = '';
+    return;
+  }
+  if (!methods.includes(orderForm.payment_method)) {
+    orderForm.payment_method = methods[0];
   }
 }
 
 function ensurePaymentChannel() {
+  if (orderForm.payment_method === 'external' && !externalPaymentEnabled.value) {
+    ensurePaymentMethod();
+  }
   if (orderForm.payment_method !== 'external') {
     orderForm.payment_channel = '';
     return;
@@ -241,6 +305,11 @@ async function submitOrder() {
   }
 
   try {
+    if (!orderForm.payment_method) {
+      orderError.value = '当前没有可用的支付方式，请联系管理员。';
+      orderLoading.value = false;
+      return;
+    }
     if (orderForm.payment_method === 'external' && !orderForm.payment_channel) {
       orderError.value = '请选择可用的支付通道。';
       orderLoading.value = false;
@@ -378,7 +447,8 @@ watch(
   },
 );
 
-watch(paymentChannels, () => {
+watch([paymentChannels, paymentMethods], () => {
+  ensurePaymentMethod();
   ensurePaymentChannel();
 });
 
@@ -517,13 +587,30 @@ watch(orderResult, () => {
                     <SelectValue placeholder="请选择" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="balance">余额</SelectItem>
-                    <SelectItem value="external">外部</SelectItem>
-                    <SelectItem value="manual">线下</SelectItem>
+                    <SelectItem
+                      v-for="method in availablePaymentMethods"
+                      :key="method"
+                      :value="method"
+                      :disabled="method === 'external' && (channelsLoading || !externalPaymentEnabled)"
+                    >
+                      {{ paymentMethodLabel(method) }}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <p v-if="methodsLoaded && !availablePaymentMethods.length" class="text-xs text-muted-foreground">
+                  暂无可用支付方式，请联系管理员。
+                </p>
+                <p v-else-if="methodsLoaded" class="text-xs text-muted-foreground">
+                  支付方式由后台配置，如需调整请联系管理员。
+                </p>
+                <p v-if="hasExternalMethod && !channelsLoading && !externalPaymentEnabled" class="text-xs text-muted-foreground">
+                  外部支付暂未配置，请先使用余额或联系管理员。
+                </p>
               </div>
-              <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
+              <div
+                v-if="orderForm.payment_method === 'external' && externalPaymentEnabled"
+                class="stack stack--tight"
+              >
                 <Label>支付通道</Label>
                 <Select
                   v-model="orderForm.payment_channel"
@@ -547,12 +634,8 @@ watch(orderResult, () => {
                   暂无可用支付通道。
                 </p>
               </div>
-              <div v-if="orderForm.payment_method === 'external'" class="stack stack--tight">
-                <Label>支付回跳</Label>
-                <Input v-model="orderForm.payment_return_url" type="url" placeholder="https://..." />
-              </div>
               <p v-if="orderForm.payment_method === 'external'" class="text-xs text-muted-foreground">
-                外部支付会创建待支付订单，支付完成后自动跳转。
+                外部支付会创建待支付订单，支付完成后自动返回订单页。
               </p>
               <p v-if="orderForm.payment_method === 'manual'" class="text-xs text-muted-foreground">
                 线下支付会创建待支付订单，需要管理员确认到账。

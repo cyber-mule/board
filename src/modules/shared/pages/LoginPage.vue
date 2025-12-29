@@ -96,6 +96,23 @@ async function handleSubmit() {
       <CardFooter class="stack">
         <Separator />
         <div class="helper">
+          <p class="helper__title">快速入口</p>
+          <p class="helper__text">注册新账号或找回密码。</p>
+          <div class="helper__actions">
+            <RouterLink to="/register" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" variant="secondary" @click="navigate">
+                注册账号
+              </Button>
+            </RouterLink>
+            <RouterLink to="/register?mode=forgot" custom v-slot="{ href, navigate }">
+              <Button :as="'a'" :href="href" variant="secondary" @click="navigate">
+                找回密码
+              </Button>
+            </RouterLink>
+          </div>
+        </div>
+        <Separator />
+        <div class="helper">
           <p class="helper__title">演示账号</p>
           <p class="helper__text">一键填充 `frontend-guide.md` 中的本地演示账号。</p>
           <div class="helper__actions">

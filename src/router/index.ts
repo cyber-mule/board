@@ -20,10 +20,12 @@ import UserPlansPage from '../modules/user/pages/UserPlansPage.vue';
 import UserBalancePage from '../modules/user/pages/UserBalancePage.vue';
 import UserSubscriptionsPage from '../modules/user/pages/UserSubscriptionsPage.vue';
 import LoginPage from '../modules/shared/pages/LoginPage.vue';
+import RegisterPage from '../modules/shared/pages/RegisterPage.vue';
 
 const routes = [
   { path: '/', redirect: '/user' },
   { path: '/login', name: 'login', component: LoginPage },
+  { path: '/register', name: 'register', component: RegisterPage },
   {
     path: '/admin',
     meta: { role: 'admin' },
@@ -83,7 +85,7 @@ router.beforeEach(async (to) => {
   const requiredRole = to.meta.role as string | undefined;
   const refreshToken = getRefreshToken();
 
-  if (to.name === 'login') {
+  if (to.name === 'login' || to.name === 'register') {
     if (!getRole() && refreshToken) {
       try {
         await ensureSession();

@@ -26,6 +26,10 @@ import type {
   LoginRequest,
   LoginResponse,
   RegisterRequest,
+  VerifyRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  MessageResponse,
   Plan,
   UserSubscription,
   Announcement,
@@ -437,6 +441,76 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/auth/verify`)) {
+    if (method === 'POST') {
+      const { email, code } = body as VerifyRequest;
+      const user = getUserByEmail(email);
+
+      if (!email || !code) {
+        return mockError('Missing verification details', 400);
+      }
+
+      if (!user) {
+        return mockError('Account not found', 404);
+      }
+
+      setCurrentUser(user);
+      const mockAccessToken = `mock-access-token-${user.id}`;
+      const mockRefreshToken = `mock-refresh-token-${user.id}`;
+      setTokens(mockAccessToken, mockRefreshToken);
+      const userRoles = (user as { roles?: string[]; role?: string }).roles;
+      const authUser = {
+        ...user,
+        roles: userRoles ?? (user.role ? [user.role] : []),
+      };
+
+      const response: LoginResponse = {
+        user: authUser,
+        access_token: mockAccessToken,
+        refresh_token: mockRefreshToken,
+        expires_in: 3600,
+      };
+
+      return mockResponse(response);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/auth/forgot`)) {
+    if (method === 'POST') {
+      const { email } = body as ForgotPasswordRequest;
+
+      if (!email) {
+        return mockError('Email required', 400);
+      }
+
+      const response: MessageResponse = {
+        message: '验证码已发送，请检查邮箱。',
+      };
+
+      return mockResponse(response);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/auth/reset`)) {
+    if (method === 'POST') {
+      const { email, code, password } = body as ResetPasswordRequest;
+
+      if (!email || !code || !password) {
+        return mockError('Missing reset details', 400);
+      }
+
+      if (!getUserByEmail(email)) {
+        return mockError('Account not found', 404);
+      }
+
+      const response: MessageResponse = {
+        message: '密码已重置，请使用新密码登录。',
+      };
+
+      return mockResponse(response);
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/auth/refresh`)) {
     if (method === 'POST' && currentUser) {
       const mockAccessToken = `mock-access-token-${currentUser.id}-refreshed`;
@@ -561,7 +635,11 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       const channels = provider
         ? enabledChannels.filter((channel) => channel.provider === provider)
         : enabledChannels;
-      return mockResponse({ channels });
+      const paymentMethods = ['balance', 'manual'];
+      if (channels.length) {
+        paymentMethods.splice(1, 0, 'external');
+      }
+      return mockResponse({ channels, payment_methods: paymentMethods });
     }
   }
 

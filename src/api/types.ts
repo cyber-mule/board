@@ -15,6 +15,48 @@ export type AuthenticatedUser = {
   updated_at: number;
 };
 
+export type LoginRequest = {
+  email: string;
+  password: string;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  refresh_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_expires_in?: number;
+  role?: string;
+  user?: AuthenticatedUser;
+  requires_verification?: boolean;
+};
+
+export type RegisterRequest = {
+  email: string;
+  password: string;
+  display_name?: string;
+  invite_code?: string;
+};
+
+export type RegisterResponse = LoginResponse & {
+  requires_verification?: boolean;
+};
+
+export type VerifyRequest = {
+  email: string;
+  code: string;
+};
+
+export type ForgotPasswordRequest = {
+  email: string;
+};
+
+export type ResetPasswordRequest = {
+  email: string;
+  code: string;
+  password: string;
+};
+
 export type AdminModule = {
   key: string;
   name: string;
@@ -602,6 +644,7 @@ export type UserOrderDetailResponse = {
 
 export type UserPaymentChannelsResponse = {
   channels: PaymentChannelSummary[];
+  payment_methods?: string[];
 };
 
 export type UserOrderPaymentStatusResponse = {
