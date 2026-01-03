@@ -190,7 +190,7 @@ onMounted(() => {
               <div>
                 <p class="data-row__title">{{ node.name }}</p>
                 <p class="data-row__meta">
-                  {{ node.region || '未知区域' }} · {{ node.protocols?.join(', ') || '暂无协议' }}
+                  {{ node.region || '未知区域' }} · {{ node.isp || '未知运营商' }}
                 </p>
               </div>
               <div class="data-row__aside">
@@ -279,4 +279,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-

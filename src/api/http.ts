@@ -4,6 +4,8 @@ import { refreshTokens } from './auth';
 import { buildUrl } from './url';
 import { ensureLeadingSlash } from '../utils/path';
 import { USE_MOCK, mockFetch } from '../mock';
+import { parseErrorMessage } from './error';
+import { pushToast } from '../lib/toast';
 
 type RequestOptions = {
   method?: string;
@@ -11,6 +13,8 @@ type RequestOptions = {
   body?: BodyInit | null;
   json?: unknown;
   auth?: boolean;
+  toastOnError?: boolean;
+  toastTitle?: string;
 };
 
 let refreshPromise: Promise<void> | null = null;
@@ -49,6 +53,19 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
   const headers = new Headers(options.headers);
   const payload = options.json !== undefined ? JSON.stringify(options.json) : options.body;
 
+  async function buildError(response: Response, fallback: string): Promise<Error> {
+    const errorText = await response.text().catch(() => '');
+    const message = parseErrorMessage(errorText, fallback);
+    if (options.toastOnError !== false) {
+      pushToast({
+        title: options.toastTitle ?? '操作失败',
+        description: message,
+        variant: 'error',
+      });
+    }
+    return new Error(message);
+  }
+
   if (options.json !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
@@ -70,8 +87,7 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`Request failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+      throw await buildError(response, `Request failed (${response.status})`);
     }
 
     return handleResponse<T>(response);
@@ -108,13 +124,11 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
       return handleResponse<T>(retryResponse);
     }
 
-    const retryText = await retryResponse.text().catch(() => '');
-    throw new Error(`Request failed: ${retryResponse.status} ${retryResponse.statusText}${retryText ? ` - ${retryText}` : ''}`);
+    throw await buildError(retryResponse, `Request failed (${retryResponse.status})`);
   }
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Request failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+    throw await buildError(response, `Request failed (${response.status})`);
   }
 
   return handleResponse<T>(response);

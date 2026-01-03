@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,13 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { adminApi } from '../../../api';
 import { formatBytes, formatCurrency, formatDateTime } from '../../../utils/format';
-import type { CreatePlanRequest, PaginationMeta, PlanSummary, UpdatePlanRequest } from '../../../api/types';
+import type {
+  CreatePlanRequest,
+  PaginationMeta,
+  PlanSummary,
+  ProtocolBindingSummary,
+  UpdatePlanRequest,
+} from '../../../api/types';
 
 const plans = ref<PlanSummary[]>([]);
 const loading = ref(true);
@@ -36,6 +42,10 @@ const selectedPlan = ref<PlanSummary | null>(null);
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const isSaving = ref(false);
+const protocolBindings = ref<ProtocolBindingSummary[]>([]);
+const bindingsLoading = ref(false);
+const bindingsError = ref('');
+const bindingSearch = ref('');
 
 const perPage = 10;
 const page = ref(1);
@@ -49,12 +59,13 @@ const filters = reactive({
   direction: 'desc',
 });
 
-const createForm = reactive<CreatePlanRequest>({
+const createForm = reactive<CreatePlanRequest & { binding_ids: number[] }>({
   name: '',
   slug: '',
   description: '',
   tags: [],
   features: [],
+  binding_ids: [],
   price_cents: 0,
   currency: 'USD',
   duration_days: 30,
@@ -65,12 +76,13 @@ const createForm = reactive<CreatePlanRequest>({
   visible: false,
 });
 
-const editForm = reactive<UpdatePlanRequest>({
+const editForm = reactive<UpdatePlanRequest & { binding_ids: number[] }>({
   name: '',
   slug: '',
   description: '',
   tags: [],
   features: [],
+  binding_ids: [],
   price_cents: 0,
   currency: 'USD',
   duration_days: 30,
@@ -80,11 +92,46 @@ const editForm = reactive<UpdatePlanRequest>({
   status: 'draft',
   visible: false,
 });
+
+type TrafficUnit = 'b' | 'kb' | 'mb' | 'gb' | 'tb';
+
+const trafficUnitOptions: TrafficUnit[] = ['tb', 'gb', 'mb', 'kb', 'b'];
+const trafficUnitMeta: Record<TrafficUnit, { label: string; factor: number }> = {
+  b: { label: 'B', factor: 1 },
+  kb: { label: 'KB', factor: 1024 },
+  mb: { label: 'MB', factor: 1024 ** 2 },
+  gb: { label: 'GB', factor: 1024 ** 3 },
+  tb: { label: 'TB', factor: 1024 ** 4 },
+};
 
 const tagInput = ref('');
 const featureInput = ref('');
 const editTagInput = ref('');
 const editFeatureInput = ref('');
+const createTrafficValue = ref<number | null>(0);
+const createTrafficUnit = ref<TrafficUnit>('gb');
+const editTrafficValue = ref<number | null>(0);
+const editTrafficUnit = ref<TrafficUnit>('gb');
+
+const filteredBindings = computed(() => {
+  const query = bindingSearch.value.trim().toLowerCase();
+  if (!query) {
+    return protocolBindings.value;
+  }
+  return protocolBindings.value.filter((binding) => {
+    const haystack = [
+      binding.name,
+      binding.node_name,
+      binding.protocol,
+      String(binding.id),
+      binding.node_id ? String(binding.node_id) : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+});
 
 function planStatusVariant(value?: string): 'default' | 'secondary' | 'outline' {
   switch (value) {
@@ -105,6 +152,82 @@ function planStatusLabel(value?: string) {
       return '草稿';
     default:
       return value || '未知';
+  }
+}
+
+function toBytes(value: number | null, unit: TrafficUnit): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value <= 0) {
+    return 0;
+  }
+  return Math.round(value * trafficUnitMeta[unit].factor);
+}
+
+function splitTrafficLimit(bytes?: number) {
+  if (!bytes || bytes <= 0) {
+    return { value: 0, unit: 'gb' as TrafficUnit };
+  }
+  const unit: TrafficUnit =
+    bytes >= trafficUnitMeta.tb.factor
+      ? 'tb'
+      : bytes >= trafficUnitMeta.gb.factor
+        ? 'gb'
+        : bytes >= trafficUnitMeta.mb.factor
+          ? 'mb'
+          : bytes >= trafficUnitMeta.kb.factor
+            ? 'kb'
+            : 'b';
+  const value = Number((bytes / trafficUnitMeta[unit].factor).toFixed(2));
+  return { value, unit };
+}
+
+function bindingLabel(bindingId: number) {
+  const binding = protocolBindings.value.find((item) => item.id === bindingId);
+  if (!binding) {
+    return `绑定 #${bindingId}`;
+  }
+  const nodeLabel = binding.node_name || (binding.node_id ? `节点 ${binding.node_id}` : '未知节点');
+  const protocolLabel = binding.protocol || '未知协议';
+  return `${protocolLabel} · ${nodeLabel}`;
+}
+
+function toggleBinding(list: number[], bindingId: number, checked: boolean | 'indeterminate') {
+  const isChecked = checked === true;
+  if (isChecked && !list.includes(bindingId)) {
+    list.push(bindingId);
+    return;
+  }
+  if (!isChecked && list.includes(bindingId)) {
+    const index = list.indexOf(bindingId);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+  }
+}
+
+function removeBinding(list: number[], bindingId: number) {
+  const index = list.indexOf(bindingId);
+  if (index >= 0) {
+    list.splice(index, 1);
+  }
+}
+
+async function loadProtocolBindings() {
+  bindingsLoading.value = true;
+  bindingsError.value = '';
+
+  try {
+    const response = await adminApi.fetchAdminProtocolBindings({
+      page: 1,
+      per_page: 200,
+    });
+    protocolBindings.value = response.bindings ?? [];
+  } catch (error) {
+    bindingsError.value = error instanceof Error ? error.message : '加载协议绑定失败';
+  } finally {
+    bindingsLoading.value = false;
   }
 }
 
@@ -178,16 +301,23 @@ function openCreateModal() {
   createForm.description = '';
   createForm.tags = [];
   createForm.features = [];
+  createForm.binding_ids = [];
   createForm.price_cents = 0;
   createForm.currency = 'USD';
   createForm.duration_days = 30;
   createForm.traffic_limit_bytes = 0;
+  createTrafficValue.value = 0;
+  createTrafficUnit.value = 'gb';
   createForm.devices_limit = 1;
   createForm.sort_order = 0;
   createForm.status = 'draft';
   createForm.visible = false;
   tagInput.value = '';
   featureInput.value = '';
+  bindingSearch.value = '';
+  if (!protocolBindings.value.length) {
+    void loadProtocolBindings();
+  }
   showCreateModal.value = true;
 }
 
@@ -205,7 +335,11 @@ async function handleCreate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.createAdminPlan(createForm);
+    const payload: CreatePlanRequest = {
+      ...createForm,
+      traffic_limit_bytes: toBytes(createTrafficValue.value, createTrafficUnit.value),
+    };
+    await adminApi.createAdminPlan(payload);
     closeCreateModal();
     await loadPlans();
   } catch (error) {
@@ -222,16 +356,24 @@ function openEditModal(plan: PlanSummary) {
   editForm.description = plan.description || '';
   editForm.tags = plan.tags ? [...plan.tags] : [];
   editForm.features = plan.features ? [...plan.features] : [];
+  editForm.binding_ids = plan.binding_ids ? [...plan.binding_ids] : [];
   editForm.price_cents = plan.price_cents;
   editForm.currency = plan.currency;
   editForm.duration_days = plan.duration_days;
   editForm.traffic_limit_bytes = plan.traffic_limit_bytes || 0;
+  const trafficLimit = splitTrafficLimit(plan.traffic_limit_bytes);
+  editTrafficValue.value = trafficLimit.value;
+  editTrafficUnit.value = trafficLimit.unit;
   editForm.devices_limit = plan.devices_limit || 1;
   editForm.sort_order = plan.sort_order || 0;
   editForm.status = plan.status || 'draft';
   editForm.visible = plan.visible || false;
   editTagInput.value = '';
   editFeatureInput.value = '';
+  bindingSearch.value = '';
+  if (!protocolBindings.value.length) {
+    void loadProtocolBindings();
+  }
   showEditModal.value = true;
 }
 
@@ -257,7 +399,11 @@ async function handleUpdate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.updateAdminPlan(selectedPlan.value.id, editForm);
+    const payload: UpdatePlanRequest = {
+      ...editForm,
+      traffic_limit_bytes: toBytes(editTrafficValue.value, editTrafficUnit.value),
+    };
+    await adminApi.updateAdminPlan(selectedPlan.value.id, payload);
     closeEditModal();
     await loadPlans();
   } catch (error) {
@@ -325,6 +471,7 @@ function removeEditFeature(feature: string) {
 
 onMounted(() => {
   void loadPlans();
+  void loadProtocolBindings();
 });
 </script>
 
@@ -502,6 +649,14 @@ onMounted(() => {
                 </li>
               </ul>
             </div>
+            <div v-if="selectedPlan.binding_ids?.length" class="detail-section">
+              <h4>协议绑定</h4>
+              <div class="cluster">
+                <Badge v-for="bindingId in selectedPlan.binding_ids" :key="bindingId" variant="outline">
+                  {{ bindingLabel(bindingId) }}
+                </Badge>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -573,14 +728,27 @@ onMounted(() => {
               />
             </div>
             <div class="stack stack--tight">
-              <Label for="create-traffic">流量上限（字节）</Label>
-              <Input
-                id="create-traffic"
-                v-model.number="createForm.traffic_limit_bytes"
-                type="number"
-                min="0"
-                placeholder="107374182400"
-              />
+              <Label for="create-traffic">流量上限</Label>
+              <div class="traffic-input">
+                <Input
+                  id="create-traffic"
+                  v-model.number="createTrafficValue"
+                  type="number"
+                  min="0"
+                  placeholder="100"
+                  class="traffic-input__value"
+                />
+                <Select v-model="createTrafficUnit">
+                  <SelectTrigger class="traffic-input__unit">
+                    <SelectValue placeholder="单位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="unit in trafficUnitOptions" :key="unit" :value="unit">
+                      {{ trafficUnitMeta[unit].label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
@@ -667,6 +835,51 @@ onMounted(() => {
               </Badge>
             </div>
           </div>
+
+          <div class="stack stack--tight">
+            <Label>协议绑定</Label>
+            <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
+            <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
+            <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
+            <p v-else-if="filteredBindings.length === 0" class="panel-card__empty">暂无可用绑定。</p>
+            <div v-else class="data-list data-list--compact">
+              <div v-for="binding in filteredBindings" :key="binding.id" class="data-row data-row--stack">
+                <div class="cluster cluster--center">
+                  <Checkbox
+                    :checked="createForm.binding_ids.includes(binding.id)"
+                    @update:checked="(checked) => toggleBinding(createForm.binding_ids, binding.id, checked)"
+                  />
+                  <div>
+                    <p class="data-row__title">{{ binding.name || binding.protocol || '未命名绑定' }}</p>
+                    <p class="data-row__meta">
+                      节点 {{ binding.node_name || binding.node_id || '-' }} ·
+                      {{ binding.protocol || '未知协议' }} ·
+                      ID {{ binding.id }}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline">{{ binding.status || 'unknown' }}</Badge>
+              </div>
+            </div>
+            <div v-if="createForm.binding_ids.length" class="cluster">
+              <Badge
+                v-for="bindingId in createForm.binding_ids"
+                :key="bindingId"
+                variant="secondary"
+                class="inline-gap"
+              >
+                {{ bindingLabel(bindingId) }}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  @click="removeBinding(createForm.binding_ids, bindingId)"
+                >
+                  ×
+                </Button>
+              </Badge>
+            </div>
+          </div>
         </div>
         <DialogFooter class="mt-4">
           <Button variant="secondary" type="button" @click="closeCreateModal">取消</Button>
@@ -743,14 +956,27 @@ onMounted(() => {
               />
             </div>
             <div class="stack stack--tight">
-              <Label for="edit-traffic">流量上限（字节）</Label>
-              <Input
-                id="edit-traffic"
-                v-model.number="editForm.traffic_limit_bytes"
-                type="number"
-                min="0"
-                placeholder="107374182400"
-              />
+              <Label for="edit-traffic">流量上限</Label>
+              <div class="traffic-input">
+                <Input
+                  id="edit-traffic"
+                  v-model.number="editTrafficValue"
+                  type="number"
+                  min="0"
+                  placeholder="100"
+                  class="traffic-input__value"
+                />
+                <Select v-model="editTrafficUnit">
+                  <SelectTrigger class="traffic-input__unit">
+                    <SelectValue placeholder="单位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="unit in trafficUnitOptions" :key="unit" :value="unit">
+                      {{ trafficUnitMeta[unit].label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
@@ -837,6 +1063,51 @@ onMounted(() => {
               </Badge>
             </div>
           </div>
+
+          <div class="stack stack--tight">
+            <Label>协议绑定</Label>
+            <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
+            <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
+            <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
+            <p v-else-if="filteredBindings.length === 0" class="panel-card__empty">暂无可用绑定。</p>
+            <div v-else class="data-list data-list--compact">
+              <div v-for="binding in filteredBindings" :key="binding.id" class="data-row data-row--stack">
+                <div class="cluster cluster--center">
+                  <Checkbox
+                    :checked="editForm.binding_ids.includes(binding.id)"
+                    @update:checked="(checked) => toggleBinding(editForm.binding_ids, binding.id, checked)"
+                  />
+                  <div>
+                    <p class="data-row__title">{{ binding.name || binding.protocol || '未命名绑定' }}</p>
+                    <p class="data-row__meta">
+                      节点 {{ binding.node_name || binding.node_id || '-' }} ·
+                      {{ binding.protocol || '未知协议' }} ·
+                      ID {{ binding.id }}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline">{{ binding.status || 'unknown' }}</Badge>
+              </div>
+            </div>
+            <div v-if="editForm.binding_ids.length" class="cluster">
+              <Badge
+                v-for="bindingId in editForm.binding_ids"
+                :key="bindingId"
+                variant="secondary"
+                class="inline-gap"
+              >
+                {{ bindingLabel(bindingId) }}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  @click="removeBinding(editForm.binding_ids, bindingId)"
+                >
+                  ×
+                </Button>
+              </Badge>
+            </div>
+          </div>
         </div>
         <DialogFooter class="mt-4">
           <Button variant="secondary" type="button" @click="closeEditModal">取消</Button>
@@ -848,4 +1119,3 @@ onMounted(() => {
     </Dialog>
   </div>
 </template>
-

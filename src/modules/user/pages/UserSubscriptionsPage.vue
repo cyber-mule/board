@@ -22,9 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SUBSCRIPTION_BASE_URL, SUBSCRIPTION_PATH } from '@/config/env';
 import { formatBytes, formatDate, formatDateTime } from '../../../utils/format';
 import { userApi } from '../../../api';
-import type { PaginationMeta, UserSubscriptionPreview, UserSubscriptionSummary } from '../../../api/types';
+import type {
+  PaginationMeta,
+  UserSubscriptionPreview,
+  UserSubscriptionSummary,
+  UserSubscriptionTrafficSummary,
+  UserTrafficUsageRecord,
+} from '../../../api/types';
 
 type DiffRow = {
   index: number;
@@ -53,6 +60,7 @@ const actionMessage = ref('');
 const actionError = ref('');
 const applyLoading = ref(false);
 const perPage = 10;
+const trafficPerPage = 10;
 const page = ref(1);
 const pagination = ref<PaginationMeta | null>(null);
 const jumpPage = ref('');
@@ -99,7 +107,7 @@ const compare = ref<{
   current: UserSubscriptionPreview;
   selected: UserSubscriptionPreview;
 } | null>(null);
-const toolTab = ref<'preview' | 'compare'>('preview');
+const toolTab = ref<'preview' | 'compare' | 'traffic'>('preview');
 const selectedSubscription = computed(() => {
   return (
     subscriptions.value.find(
@@ -109,21 +117,63 @@ const selectedSubscription = computed(() => {
 });
 const detailMessage = ref('');
 const detailError = ref('');
+function normalizeBaseUrl(value: string): string {
+  if (value) {
+    return value.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return '';
+}
+
+function buildSubscriptionUrl(token?: string): string {
+  if (!token) {
+    return '';
+  }
+  const base = normalizeBaseUrl(SUBSCRIPTION_BASE_URL);
+  if (!base) {
+    return '';
+  }
+  const normalizedPath = SUBSCRIPTION_PATH
+    ? `/${SUBSCRIPTION_PATH.replace(/^\/+|\/+$/g, '')}`
+    : '';
+  const encodedToken = encodeURIComponent(token);
+  return `${base}${normalizedPath}/${encodedToken}`;
+}
+
 const subscriptionUrl = computed(() => {
   const subscription = selectedSubscription.value;
   if (!subscription) {
     return '';
   }
-  return subscription.subscription_url || subscription.subscribe_url || '';
+  return (
+    buildSubscriptionUrl(subscription.token) ||
+    subscription.subscription_url ||
+    subscription.subscribe_url ||
+    ''
+  );
 });
-const subscriptionToken = computed(() => {
-  return selectedSubscription.value?.token ?? '';
-});
+const hasSubscriptionUrl = computed(() => Boolean(subscriptionUrl.value));
 const qrCodeUrl = ref('');
 const qrLoading = ref(false);
 const qrError = ref('');
 const showQr = ref(false);
 const qrSource = ref('');
+const trafficSummary = ref<UserSubscriptionTrafficSummary | null>(null);
+const trafficRecords = ref<UserTrafficUsageRecord[]>([]);
+const trafficLoading = ref(false);
+const trafficError = ref('');
+const trafficPage = ref(1);
+const trafficPagination = ref<PaginationMeta | null>(null);
+const trafficSubscriptionId = ref<number | null>(null);
+const trafficFilters = reactive({
+  protocol: '',
+  node_id: '',
+  binding_id: '',
+  from: '',
+  to: '',
+});
 
 const isPreviewReady = computed(() => preview.value !== null && !previewLoading.value);
 const maxDiffLines = 200;
@@ -139,6 +189,22 @@ const resolvedDownloadFormat = computed(() => {
     return 'yaml';
   }
   return 'txt';
+});
+
+const trafficRange = computed(() => {
+  if (!trafficRecords.value.length) {
+    return null;
+  }
+  const times = trafficRecords.value
+    .map((record) => record.observed_at)
+    .filter((value) => typeof value === 'number' && Number.isFinite(value));
+  if (!times.length) {
+    return null;
+  }
+  return {
+    latest: Math.max(...times),
+    earliest: Math.min(...times),
+  };
 });
 
 const compareLines = computed(() => {
@@ -308,6 +374,17 @@ function clearSavedFilters() {
     return;
   }
   window.localStorage.removeItem(storageKey);
+}
+
+function toOptionalNumber(value: string | number): number | undefined {
+  if (value === '' || value === null || value === undefined) {
+    return undefined;
+  }
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function readQueryValue(key: string): string | null {
@@ -684,6 +761,63 @@ async function jumpToPage() {
   }
 }
 
+function resetTrafficFilters() {
+  trafficFilters.protocol = '';
+  trafficFilters.node_id = '';
+  trafficFilters.binding_id = '';
+  trafficFilters.from = '';
+  trafficFilters.to = '';
+  void loadTraffic(1);
+}
+
+async function loadTraffic(targetPage = 1, mode: 'replace' | 'append' = 'replace') {
+  const subscription = selectedSubscription.value;
+  if (!subscription) {
+    trafficError.value = '请选择订阅后查看流量。';
+    return;
+  }
+
+  if (mode === 'replace') {
+    trafficRecords.value = [];
+    trafficSummary.value = null;
+    trafficPagination.value = null;
+  }
+
+  trafficLoading.value = true;
+  trafficError.value = '';
+
+  try {
+    const response = await userApi.fetchUserSubscriptionTraffic(subscription.id, {
+      page: targetPage,
+      per_page: trafficPerPage,
+      protocol: trafficFilters.protocol || undefined,
+      node_id: toOptionalNumber(trafficFilters.node_id),
+      binding_id: toOptionalNumber(trafficFilters.binding_id),
+      from: toOptionalNumber(trafficFilters.from),
+      to: toOptionalNumber(trafficFilters.to),
+    });
+    trafficSummary.value = response.summary;
+    trafficPagination.value = response.pagination ?? null;
+    trafficPage.value = response.pagination?.page ?? targetPage;
+    trafficSubscriptionId.value = subscription.id;
+    trafficRecords.value =
+      mode === 'append'
+        ? [...trafficRecords.value, ...(response.records ?? [])]
+        : response.records ?? [];
+  } catch (error) {
+    trafficError.value = error instanceof Error ? error.message : '加载流量明细失败';
+  } finally {
+    trafficLoading.value = false;
+  }
+}
+
+async function loadMoreTraffic() {
+  if (!trafficPagination.value?.has_next || trafficLoading.value) {
+    return;
+  }
+  await loadTraffic(trafficPage.value + 1, 'append');
+}
+
 async function handlePreview(subscription: UserSubscriptionSummary) {
   toolTab.value = 'preview';
   previewLoading.value = true;
@@ -923,6 +1057,23 @@ watch(
   },
 );
 
+watch(
+  () => toolTab.value,
+  (value) => {
+    if (value !== 'traffic') {
+      return;
+    }
+    const subscription = selectedSubscription.value;
+    if (!subscription) {
+      return;
+    }
+    if (trafficSubscriptionId.value === subscription.id && trafficPagination.value) {
+      return;
+    }
+    void loadTraffic(1);
+  },
+);
+
 onBeforeUnmount(() => {
   if (filterSyncTimer !== null) {
     window.clearTimeout(filterSyncTimer);
@@ -939,6 +1090,12 @@ watch(selectedSubscriptionId, () => {
   compareError.value = '';
   compareMessage.value = '';
   toolTab.value = 'preview';
+  trafficSummary.value = null;
+  trafficRecords.value = [];
+  trafficPagination.value = null;
+  trafficPage.value = 1;
+  trafficError.value = '';
+  trafficSubscriptionId.value = null;
   detailMessage.value = '';
   detailError.value = '';
   showQr.value = false;
@@ -1218,17 +1375,16 @@ watch(selectedSubscriptionId, () => {
               </p>
             </div>
           </div>
-          <div class="detail-grid">
+          <div v-if="hasSubscriptionUrl" class="detail-grid">
             <div>
               <p class="detail-label">订阅地址</p>
-              <p class="detail-value">{{ subscriptionUrl || '未提供' }}</p>
-            </div>
-            <div>
-              <p class="detail-label">订阅 Token</p>
-              <p class="detail-value">{{ subscriptionToken || '-' }}</p>
+              <p class="detail-value">{{ subscriptionUrl }}</p>
             </div>
           </div>
-          <div class="cluster cluster--center">
+          <p v-else class="text-xs text-muted-foreground">
+            订阅地址未配置，可使用订阅预览下载内容或联系管理员轮转凭证。
+          </p>
+          <div v-if="hasSubscriptionUrl" class="cluster cluster--center">
             <Button
               size="sm"
               variant="secondary"
@@ -1250,27 +1406,15 @@ watch(selectedSubscriptionId, () => {
             >
               打开链接
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              type="button"
-              :disabled="!subscriptionToken"
-              @click="copyDetail('订阅 Token', subscriptionToken)"
-            >
-              复制 Token
-            </Button>
             <Button size="sm" variant="ghost" type="button" @click="toggleQr">
               {{ showQr ? '隐藏二维码' : '生成二维码' }}
             </Button>
           </div>
-          <div v-if="showQr" class="qr-panel">
+          <div v-if="hasSubscriptionUrl && showQr" class="qr-panel">
             <p v-if="qrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
             <img v-else-if="qrCodeUrl" :src="qrCodeUrl" alt="订阅二维码" class="qr-image" />
             <p v-else class="text-xs text-muted-foreground">{{ qrError || '二维码不可用。' }}</p>
           </div>
-          <p v-if="!subscriptionUrl && subscriptionToken" class="text-xs text-muted-foreground">
-            订阅地址未返回，可复制 Token 联系管理员确认订阅入口。
-          </p>
           <Alert v-if="detailMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
             <AlertTitle>操作成功</AlertTitle>
             <AlertDescription>{{ detailMessage }}</AlertDescription>
@@ -1319,7 +1463,7 @@ watch(selectedSubscriptionId, () => {
       <CardHeader class="cluster cluster--between cluster--start cluster--wide">
         <div>
           <CardTitle>订阅工具</CardTitle>
-          <p class="panel-card__meta">选择预览或比较视图。</p>
+          <p class="panel-card__meta">选择预览、比较或流量视图。</p>
         </div>
         <div class="cluster cluster--center">
           <Button
@@ -1338,13 +1482,23 @@ watch(selectedSubscriptionId, () => {
           >
             比较
           </Button>
+          <Button
+            size="sm"
+            :variant="toolTab === 'traffic' ? 'default' : 'secondary'"
+            type="button"
+            @click="toolTab = 'traffic'"
+          >
+            流量
+          </Button>
         </div>
       </CardHeader>
       <CardContent>
         <p class="text-sm text-muted-foreground">
           {{ toolTab === 'preview'
             ? '预览当前模板内容，支持复制与下载。'
-            : '比较当前模板与所选模板的差异。' }}
+            : toolTab === 'compare'
+              ? '比较当前模板与所选模板的差异。'
+              : '查看订阅流量明细与计费汇总。' }}
         </p>
       </CardContent>
     </Card>
@@ -1402,7 +1556,7 @@ watch(selectedSubscriptionId, () => {
       </CardContent>
     </Card>
 
-    <Card v-else>
+    <Card v-else-if="toolTab === 'compare'">
       <CardHeader class="cluster cluster--between cluster--start cluster--wide">
         <div>
           <CardTitle>模板比较</CardTitle>
@@ -1552,6 +1706,131 @@ watch(selectedSubscriptionId, () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card v-else>
+      <CardHeader class="cluster cluster--between cluster--start cluster--wide">
+        <div>
+          <CardTitle>流量明细</CardTitle>
+          <p class="panel-card__meta">
+            {{ selectedSubscription ? `订阅 #${selectedSubscription.id}` : '请选择订阅' }}
+          </p>
+        </div>
+        <div class="cluster cluster--center">
+          <Button
+            size="sm"
+            variant="secondary"
+            type="button"
+            :disabled="trafficLoading || !selectedSubscription"
+            @click="loadTraffic(1)"
+          >
+            {{ trafficLoading ? '刷新中...' : '刷新' }}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form class="form-grid form-grid--wide" @submit.prevent="loadTraffic(1)">
+          <div class="stack stack--tight">
+            <Label>协议</Label>
+            <Input v-model="trafficFilters.protocol" type="text" placeholder="http / tls / grpc" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>节点 ID</Label>
+            <Input v-model="trafficFilters.node_id" type="number" placeholder="节点 ID" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>绑定 ID</Label>
+            <Input v-model="trafficFilters.binding_id" type="number" placeholder="绑定 ID" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>起始时间</Label>
+            <Input v-model="trafficFilters.from" type="number" placeholder="Unix 秒" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>结束时间</Label>
+            <Input v-model="trafficFilters.to" type="number" placeholder="Unix 秒" />
+          </div>
+          <div class="cluster cluster--end">
+            <Button type="submit" :disabled="trafficLoading || !selectedSubscription">查询</Button>
+            <Button
+              variant="ghost"
+              type="button"
+              :disabled="trafficLoading || !selectedSubscription"
+              @click="resetTrafficFilters"
+            >
+              重置
+            </Button>
+          </div>
+        </form>
+
+        <Alert v-if="trafficError" variant="destructive">
+          <AlertTitle>加载失败</AlertTitle>
+          <AlertDescription>{{ trafficError }}</AlertDescription>
+        </Alert>
+
+        <div v-if="trafficSummary" class="detail-grid">
+          <div>
+            <p class="detail-label">原始流量</p>
+            <p class="detail-value">{{ formatBytes(trafficSummary.raw_bytes) }}</p>
+          </div>
+          <div>
+            <p class="detail-label">计费流量</p>
+            <p class="detail-value">{{ formatBytes(trafficSummary.charged_bytes) }}</p>
+          </div>
+          <div>
+            <p class="detail-label">记录数</p>
+            <p class="detail-value">{{ trafficPagination?.total_count ?? 0 }}</p>
+          </div>
+          <div v-if="trafficRange">
+            <p class="detail-label">时间范围</p>
+            <p class="detail-value">
+              {{ formatDateTime(trafficRange.latest) }} - {{ formatDateTime(trafficRange.earliest) }}
+            </p>
+          </div>
+        </div>
+
+        <p v-if="!selectedSubscription" class="panel-card__empty">请选择订阅查看流量。</p>
+        <p v-else-if="trafficLoading && !trafficRecords.length" class="panel-card__empty">
+          正在加载流量明细...
+        </p>
+        <p v-else-if="!trafficRecords.length" class="panel-card__empty">暂无流量记录。</p>
+        <ul v-else class="data-list">
+          <li v-for="record in trafficRecords" :key="record.id" class="data-row data-row--stack">
+            <div>
+              <p class="data-row__title">
+                {{ record.protocol || 'unknown' }} · 节点 {{ record.node_id ?? '-' }} · 绑定
+                {{ record.binding_id ?? '-' }}
+              </p>
+              <p class="data-row__meta">
+                上行 {{ formatBytes(record.bytes_up) }} · 下行 {{ formatBytes(record.bytes_down) }}
+              </p>
+              <p class="data-row__meta">
+                原始 {{ formatBytes(record.raw_bytes) }} · 计费 {{ formatBytes(record.charged_bytes) }}
+                <span v-if="record.multiplier"> · 倍率 {{ record.multiplier }}</span>
+              </p>
+            </div>
+            <div class="data-row__aside">
+              <Badge variant="outline">{{ formatDateTime(record.observed_at) }}</Badge>
+            </div>
+          </li>
+        </ul>
+
+        <div v-if="trafficPagination" class="list-footer">
+          <div class="list-footer__info">
+            已显示 {{ trafficRecords.length }} / {{ trafficPagination.total_count }}
+          </div>
+          <div class="list-footer__actions">
+            <Button
+              variant="ghost"
+              type="button"
+              :disabled="trafficLoading || !trafficPagination.has_next"
+              @click="loadMoreTraffic"
+            >
+              {{ trafficLoading ? '加载中...' : '加载更多' }}
+            </Button>
           </div>
         </div>
       </CardContent>

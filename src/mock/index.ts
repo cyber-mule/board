@@ -5,7 +5,9 @@
  * Enable mock mode by setting VITE_USE_MOCK=true in your .env.local file.
  */
 
-export const USE_MOCK = (import.meta.env.VITE_USE_MOCK as string | undefined) === 'true';
+import { getEnv } from '../config/env';
+
+export const USE_MOCK = getEnv('VITE_USE_MOCK', '') === 'true';
 
 export * from './data';
 export * from './interceptor';

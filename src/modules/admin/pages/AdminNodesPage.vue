@@ -4,6 +4,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -13,21 +21,69 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { adminApi } from '../../../api';
 import { formatDateTime } from '../../../utils/format';
-import type { NodeKernelSummary, NodeSummary, PaginationMeta } from '../../../api/types';
+import type {
+  CreateNodeRequest,
+  NodeKernelSummary,
+  NodeSummary,
+  PaginationMeta,
+  UpdateNodeRequest,
+} from '../../../api/types';
 
 const nodes = ref<NodeSummary[]>([]);
 const loading = ref(true);
 const isLoadingMore = ref(false);
 const errorMessage = ref('');
+const actionMessage = ref('');
+const actionError = ref('');
 
 const selectedNode = ref<NodeSummary | null>(null);
 const kernels = ref<NodeKernelSummary[]>([]);
 const kernelsLoading = ref(false);
 const kernelsError = ref('');
 const syncingKernels = ref(false);
-const syncSuccess = ref(false);
+const syncNotice = ref('');
+const syncProtocol = ref('');
+const showCreateModal = ref(false);
+const showEditModal = ref(false);
+const showDisableModal = ref(false);
+const showDeleteModal = ref(false);
+const isSaving = ref(false);
+
+const createForm = reactive({
+  name: '',
+  region: '',
+  country: '',
+  isp: '',
+  tags: [] as string[],
+  capacity_mbps: null as number | null,
+  description: '',
+  access_address: '',
+  control_endpoint: '',
+  control_token: '',
+  control_access_key: '',
+  control_secret_key: '',
+});
+
+const editForm = reactive({
+  name: '',
+  region: '',
+  country: '',
+  isp: '',
+  tags: [] as string[],
+  capacity_mbps: null as number | null,
+  description: '',
+  access_address: '',
+  control_endpoint: '',
+  control_token: '',
+  control_access_key: '',
+  control_secret_key: '',
+});
+
+const tagInput = ref('');
+const editTagInput = ref('');
 
 const perPage = 10;
 const page = ref(1);
@@ -47,10 +103,13 @@ function statusVariant(value?: string): 'default' | 'secondary' | 'destructive' 
     case 'online':
       return 'default';
     case 'pending':
+    case 'maintenance':
       return 'secondary';
     case 'offline':
     case 'failed':
       return 'destructive';
+    case 'disabled':
+      return 'outline';
     default:
       return 'outline';
   }
@@ -63,18 +122,134 @@ function statusLabel(value?: string) {
       return '在线';
     case 'pending':
       return '待机';
+    case 'maintenance':
+      return '维护';
     case 'offline':
       return '离线';
     case 'failed':
       return '失败';
+    case 'disabled':
+      return '已禁用';
     default:
       return value || '未知';
   }
 }
 
+function clearMessages() {
+  actionMessage.value = '';
+  actionError.value = '';
+}
+
+function toOptionalNumber(value: number | null): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function resetCreateForm() {
+  createForm.name = '';
+  createForm.region = '';
+  createForm.country = '';
+  createForm.isp = '';
+  createForm.tags = [];
+  createForm.capacity_mbps = null;
+  createForm.description = '';
+  createForm.access_address = '';
+  createForm.control_endpoint = '';
+  createForm.control_token = '';
+  createForm.control_access_key = '';
+  createForm.control_secret_key = '';
+  tagInput.value = '';
+}
+
+function openCreateModal() {
+  clearMessages();
+  resetCreateForm();
+  showCreateModal.value = true;
+}
+
+function closeCreateModal() {
+  showCreateModal.value = false;
+}
+
+function addTag() {
+  const value = tagInput.value.trim();
+  if (!value) {
+    return;
+  }
+  if (!createForm.tags.includes(value)) {
+    createForm.tags.push(value);
+  }
+  tagInput.value = '';
+}
+
+function removeTag(tag: string) {
+  createForm.tags = createForm.tags.filter(item => item !== tag);
+}
+
+function openEditModal(node: NodeSummary) {
+  clearMessages();
+  selectedNode.value = node;
+  editForm.name = node.name;
+  editForm.region = node.region || '';
+  editForm.country = node.country || '';
+  editForm.isp = node.isp || '';
+  editForm.tags = node.tags ? [...node.tags] : [];
+  editForm.capacity_mbps = node.capacity_mbps ?? null;
+  editForm.description = node.description || '';
+  editForm.access_address = node.access_address || '';
+  editForm.control_endpoint = node.control_endpoint || '';
+  editForm.control_token = '';
+  editForm.control_access_key = '';
+  editForm.control_secret_key = '';
+  editTagInput.value = '';
+  showEditModal.value = true;
+}
+
+function closeEditModal() {
+  showEditModal.value = false;
+}
+
+function addEditTag() {
+  const value = editTagInput.value.trim();
+  if (!value) {
+    return;
+  }
+  if (!editForm.tags.includes(value)) {
+    editForm.tags.push(value);
+  }
+  editTagInput.value = '';
+}
+
+function removeEditTag(tag: string) {
+  editForm.tags = editForm.tags.filter(item => item !== tag);
+}
+
+function openDisableModal(node: NodeSummary) {
+  clearMessages();
+  selectedNode.value = node;
+  showDisableModal.value = true;
+}
+
+function closeDisableModal() {
+  showDisableModal.value = false;
+}
+
+function openDeleteModal(node: NodeSummary) {
+  clearMessages();
+  selectedNode.value = node;
+  showDeleteModal.value = true;
+}
+
+function closeDeleteModal() {
+  showDeleteModal.value = false;
+}
+
 async function loadNodes() {
   loading.value = true;
   errorMessage.value = '';
+  const selectedId = selectedNode.value?.id ?? null;
 
   try {
     const response = await adminApi.fetchAdminNodes({
@@ -89,6 +264,9 @@ async function loadNodes() {
     nodes.value = response.nodes ?? [];
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? 1;
+    if (selectedId) {
+      selectedNode.value = nodes.value.find((node) => node.id === selectedId) ?? null;
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载节点失败';
   } finally {
@@ -126,12 +304,133 @@ async function loadMore() {
   }
 }
 
-async function selectNode(node: NodeSummary) {
-  selectedNode.value = node;
+async function handleCreate() {
+  clearMessages();
+  if (!createForm.name.trim()) {
+    actionError.value = '节点名称不能为空';
+    return;
+  }
+  if (!createForm.control_endpoint.trim()) {
+    actionError.value = '控制面地址不能为空';
+    return;
+  }
+  isSaving.value = true;
+
+  try {
+    const payload: CreateNodeRequest = {
+      name: createForm.name.trim(),
+      region: createForm.region.trim() || undefined,
+      country: createForm.country.trim() || undefined,
+      isp: createForm.isp.trim() || undefined,
+      tags: createForm.tags.length ? createForm.tags : undefined,
+      capacity_mbps: toOptionalNumber(createForm.capacity_mbps),
+      description: createForm.description.trim() || undefined,
+      access_address: createForm.access_address.trim() || undefined,
+      control_endpoint: createForm.control_endpoint.trim(),
+      control_token: createForm.control_token.trim() || undefined,
+      control_access_key: createForm.control_access_key.trim() || undefined,
+      control_secret_key: createForm.control_secret_key.trim() || undefined,
+    };
+    const response = await adminApi.createAdminNode(payload);
+    actionMessage.value = `节点 ${response.node.name} 已创建。`;
+    closeCreateModal();
+    await loadNodes();
+    selectedNode.value = nodes.value.find((node) => node.id === response.node.id) ?? null;
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '创建节点失败';
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function handleUpdate() {
+  if (!selectedNode.value) {
+    return;
+  }
+
+  clearMessages();
+  if (!editForm.name.trim()) {
+    actionError.value = '节点名称不能为空';
+    return;
+  }
+  isSaving.value = true;
+
+  try {
+    const controlToken = editForm.control_token.trim();
+    const payload: UpdateNodeRequest = {
+      name: editForm.name.trim() || undefined,
+      region: editForm.region.trim() || undefined,
+      country: editForm.country.trim() || undefined,
+      isp: editForm.isp.trim() || undefined,
+      tags: editForm.tags,
+      capacity_mbps: toOptionalNumber(editForm.capacity_mbps),
+      description: editForm.description.trim() || undefined,
+      access_address: editForm.access_address.trim() || undefined,
+      control_endpoint: editForm.control_endpoint.trim() || undefined,
+      control_token: controlToken || undefined,
+      control_access_key: editForm.control_access_key.trim() || undefined,
+      control_secret_key: editForm.control_secret_key.trim() || undefined,
+    };
+    const response = await adminApi.updateAdminNode(selectedNode.value.id, payload);
+    actionMessage.value = `节点 ${response.node.name} 已更新。`;
+    closeEditModal();
+    await loadNodes();
+    selectedNode.value = nodes.value.find((node) => node.id === response.node.id) ?? null;
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '更新节点失败';
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function handleDisable() {
+  if (!selectedNode.value) {
+    return;
+  }
+
+  clearMessages();
+  isSaving.value = true;
+
+  try {
+    const response = await adminApi.disableAdminNode(selectedNode.value.id);
+    actionMessage.value = `节点 ${response.node.name} 已禁用。`;
+    closeDisableModal();
+    await loadNodes();
+    selectedNode.value = nodes.value.find((node) => node.id === response.node.id) ?? null;
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '禁用节点失败';
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function handleDelete() {
+  if (!selectedNode.value) {
+    return;
+  }
+
+  clearMessages();
+  isSaving.value = true;
+  const nodeName = selectedNode.value.name;
+
+  try {
+    await adminApi.deleteAdminNode(selectedNode.value.id);
+    actionMessage.value = `节点 ${nodeName} 已删除。`;
+    closeDeleteModal();
+    selectedNode.value = null;
+    kernels.value = [];
+    await loadNodes();
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '删除节点失败';
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function loadKernels(node: NodeSummary) {
   kernels.value = [];
   kernelsLoading.value = true;
   kernelsError.value = '';
-  syncSuccess.value = false;
 
   try {
     const response = await adminApi.fetchAdminNodeKernels(node.id);
@@ -143,27 +442,42 @@ async function selectNode(node: NodeSummary) {
   }
 }
 
+async function selectNode(node: NodeSummary) {
+  selectedNode.value = node;
+  syncNotice.value = '';
+  syncProtocol.value = '';
+  syncingKernels.value = false;
+  await loadKernels(node);
+}
+
 async function syncKernels() {
   if (!selectedNode.value || syncingKernels.value) {
     return;
   }
 
+  const node = selectedNode.value;
   syncingKernels.value = true;
   kernelsError.value = '';
-  syncSuccess.value = false;
+  syncNotice.value = '';
+  const protocol = syncProtocol.value.trim();
 
   try {
-    const response = await adminApi.syncNodeKernels(selectedNode.value.id);
-    kernels.value = response.kernels ?? [];
-    syncSuccess.value = true;
+    const response = await adminApi.syncNodeKernels(node.id, protocol ? { protocol } : undefined);
+    const syncedAt = response.synced_at ?? Math.floor(Date.now() / 1000);
+    syncNotice.value = response.message?.trim() || (protocol ? `已同步 ${protocol} 内核。` : '内核已成功同步。');
 
-    const nodeIndex = nodes.value.findIndex(n => n.id === selectedNode.value?.id);
+    const nodeIndex = nodes.value.findIndex(n => n.id === node.id);
     if (nodeIndex !== -1) {
-      nodes.value[nodeIndex].last_synced_at = Math.floor(Date.now() / 1000);
+      nodes.value[nodeIndex].last_synced_at = syncedAt;
+    }
+    if (selectedNode.value?.id === node.id) {
+      selectedNode.value.last_synced_at = syncedAt;
     }
 
+    await loadKernels(node);
+
     setTimeout(() => {
-      syncSuccess.value = false;
+      syncNotice.value = '';
     }, 3000);
   } catch (error) {
     kernelsError.value = error instanceof Error ? error.message : '同步内核失败';
@@ -186,6 +500,7 @@ onMounted(() => {
         <p class="page__subtitle">监控容量、状态与内核同步。</p>
       </div>
       <div class="page-section__actions">
+        <Button type="button" @click="openCreateModal">新建节点</Button>
         <Button variant="secondary" type="button" @click="loadNodes" :disabled="loading">
           {{ loading ? '刷新中...' : '刷新列表' }}
         </Button>
@@ -205,9 +520,10 @@ onMounted(() => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部</SelectItem>
-            <SelectItem value="active">在线</SelectItem>
+            <SelectItem value="online">在线</SelectItem>
             <SelectItem value="offline">离线</SelectItem>
-            <SelectItem value="pending">待机</SelectItem>
+            <SelectItem value="maintenance">维护</SelectItem>
+            <SelectItem value="disabled">已禁用</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -250,6 +566,14 @@ onMounted(() => {
       <AlertTitle>加载失败</AlertTitle>
       <AlertDescription>{{ errorMessage }}</AlertDescription>
     </Alert>
+    <Alert v-if="actionMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+      <AlertTitle>操作成功</AlertTitle>
+      <AlertDescription>{{ actionMessage }}</AlertDescription>
+    </Alert>
+    <Alert v-if="actionError" variant="destructive">
+      <AlertTitle>操作失败</AlertTitle>
+      <AlertDescription>{{ actionError }}</AlertDescription>
+    </Alert>
 
     <div class="split-grid">
       <Card>
@@ -270,7 +594,7 @@ onMounted(() => {
                 <p class="data-row__title">{{ node.name }}</p>
                 <p class="data-row__meta">
                   {{ node.region || '未知区域' }} ·
-                  {{ node.protocols?.join(', ') || '暂无协议' }}
+                  {{ node.isp || '未知运营商' }}
                 </p>
                 <p class="data-row__meta">容量 {{ node.capacity_mbps ?? '-' }} Mbps</p>
               </div>
@@ -300,8 +624,24 @@ onMounted(() => {
             </p>
           </div>
           <div v-if="selectedNode" class="page-section__actions">
-            <Button type="button" @click="syncKernels" :disabled="syncingKernels">
-              {{ syncingKernels ? '同步中...' : '同步内核' }}
+            <Button variant="secondary" type="button" :disabled="isSaving" @click="openEditModal(selectedNode)">
+              编辑
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              :disabled="isSaving || selectedNode.status === 'disabled'"
+              @click="openDisableModal(selectedNode)"
+            >
+              {{ selectedNode.status === 'disabled' ? '已禁用' : '禁用' }}
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              :disabled="isSaving"
+              @click="openDeleteModal(selectedNode)"
+            >
+              删除
             </Button>
           </div>
         </CardHeader>
@@ -322,6 +662,14 @@ onMounted(() => {
                 <p class="detail-value">{{ selectedNode.isp || '-' }}</p>
               </div>
               <div>
+                <p class="detail-label">访问地址</p>
+                <p class="detail-value">{{ selectedNode.access_address || '-' }}</p>
+              </div>
+              <div>
+                <p class="detail-label">控制面</p>
+                <p class="detail-value">{{ selectedNode.control_endpoint || '-' }}</p>
+              </div>
+              <div>
                 <p class="detail-label">状态</p>
                 <p class="detail-value">{{ statusLabel(selectedNode.status) }}</p>
               </div>
@@ -337,11 +685,28 @@ onMounted(() => {
             <p class="detail-label">描述</p>
             <p class="detail-value">{{ selectedNode.description || '暂无描述。' }}</p>
 
+            <div v-if="selectedNode.tags?.length" class="detail-section">
+              <p class="detail-label">标签</p>
+              <div class="cluster">
+                <Badge v-for="tag in selectedNode.tags" :key="tag" variant="secondary">{{ tag }}</Badge>
+              </div>
+            </div>
+
             <div class="detail-section">
               <h4>内核状态</h4>
-              <Alert v-if="syncSuccess" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+              <div class="cluster cluster--tight">
+                <Input
+                  v-model="syncProtocol"
+                  type="text"
+                  placeholder="协议（留空同步全部）"
+                />
+                <Button type="button" @click="syncKernels" :disabled="syncingKernels">
+                  {{ syncingKernels ? '同步中...' : '同步内核' }}
+                </Button>
+              </div>
+              <Alert v-if="syncNotice" class="border-emerald-200 bg-emerald-50 text-emerald-800">
                 <AlertTitle>同步完成</AlertTitle>
-                <AlertDescription>内核已成功同步。</AlertDescription>
+                <AlertDescription>{{ syncNotice }}</AlertDescription>
               </Alert>
               <div v-if="kernelsLoading || syncingKernels" class="panel-card__empty">
                 {{ syncingKernels ? '正在同步内核...' : '正在加载内核...' }}
@@ -365,6 +730,303 @@ onMounted(() => {
         </CardContent>
       </Card>
     </div>
+
+    <Dialog v-model:open="showCreateModal">
+      <DialogContent class="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>新建节点</DialogTitle>
+          <DialogDescription>录入节点基础信息与协议能力。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-node-name">节点名称</Label>
+              <Input id="create-node-name" v-model="createForm.name" type="text" placeholder="节点名称" />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-node-region">区域</Label>
+              <Input id="create-node-region" v-model="createForm.region" type="text" placeholder="区域" />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="create-node-country">国家</Label>
+              <Input id="create-node-country" v-model="createForm.country" type="text" placeholder="国家" />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-node-isp">运营商</Label>
+              <Input id="create-node-isp" v-model="createForm.isp" type="text" placeholder="运营商" />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="create-node-capacity">容量 (Mbps)</Label>
+              <Input
+                id="create-node-capacity"
+                v-model.number="createForm.capacity_mbps"
+                type="number"
+                min="0"
+                placeholder="1000"
+              />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-node-access-address">访问地址</Label>
+              <Input
+                id="create-node-access-address"
+                v-model="createForm.access_address"
+                type="text"
+                placeholder="node.example.com"
+              />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="create-node-control-endpoint">控制面地址 *</Label>
+              <Input
+                id="create-node-control-endpoint"
+                v-model="createForm.control_endpoint"
+                type="text"
+                placeholder="https://kernel.example.com/api"
+              />
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label for="create-node-control-token">控制面 Token</Label>
+            <Input
+              id="create-node-control-token"
+              v-model="createForm.control_token"
+              type="password"
+              placeholder="可选，留空则不设置"
+            />
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-node-ak">控制面 AK</Label>
+              <Input
+                id="create-node-ak"
+                v-model="createForm.control_access_key"
+                type="text"
+                placeholder="control access key"
+              />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="create-node-sk">控制面 SK</Label>
+              <Input
+                id="create-node-sk"
+                v-model="createForm.control_secret_key"
+                type="password"
+                placeholder="control secret key"
+              />
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label for="create-node-description">描述</Label>
+            <Textarea
+              id="create-node-description"
+              v-model="createForm.description"
+              rows="2"
+              placeholder="节点描述"
+            />
+          </div>
+
+          <div class="stack stack--tight">
+            <Label>标签</Label>
+            <div class="cluster">
+              <Input
+                v-model="tagInput"
+                type="text"
+                placeholder="输入标签后回车"
+                @keyup.enter.prevent="addTag"
+              />
+              <Button variant="secondary" type="button" @click="addTag">添加</Button>
+            </div>
+            <div v-if="createForm.tags.length" class="cluster">
+              <Badge v-for="tag in createForm.tags" :key="tag" variant="secondary" class="inline-gap">
+                {{ tag }}
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeTag(tag)">×</Button>
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeCreateModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleCreate">
+            {{ isSaving ? '创建中...' : '创建节点' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showEditModal">
+      <DialogContent class="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>编辑节点</DialogTitle>
+          <DialogDescription>更新节点状态、标签与协议配置。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-node-name">节点名称</Label>
+              <Input id="edit-node-name" v-model="editForm.name" type="text" placeholder="节点名称" />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-node-region">区域</Label>
+              <Input id="edit-node-region" v-model="editForm.region" type="text" placeholder="区域" />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="edit-node-country">国家</Label>
+              <Input id="edit-node-country" v-model="editForm.country" type="text" placeholder="国家" />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-node-isp">运营商</Label>
+              <Input id="edit-node-isp" v-model="editForm.isp" type="text" placeholder="运营商" />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="edit-node-capacity">容量 (Mbps)</Label>
+              <Input
+                id="edit-node-capacity"
+                v-model.number="editForm.capacity_mbps"
+                type="number"
+                min="0"
+                placeholder="1000"
+              />
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-node-access-address">访问地址</Label>
+              <Input
+                id="edit-node-access-address"
+                v-model="editForm.access_address"
+                type="text"
+                placeholder="node.example.com"
+              />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="edit-node-control-endpoint">控制面地址</Label>
+              <Input
+                id="edit-node-control-endpoint"
+                v-model="editForm.control_endpoint"
+                type="text"
+                placeholder="https://kernel.example.com/api"
+              />
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label for="edit-node-control-token">控制面 Token</Label>
+            <Input
+              id="edit-node-control-token"
+              v-model="editForm.control_token"
+              type="password"
+              placeholder="留空不修改"
+            />
+          </div>
+
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-node-ak">控制面 AK</Label>
+              <Input
+                id="edit-node-ak"
+                v-model="editForm.control_access_key"
+                type="text"
+                placeholder="留空不修改"
+              />
+            </div>
+            <div class="stack stack--tight">
+              <Label for="edit-node-sk">控制面 SK</Label>
+              <Input
+                id="edit-node-sk"
+                v-model="editForm.control_secret_key"
+                type="password"
+                placeholder="留空不修改"
+              />
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label for="edit-node-description">描述</Label>
+            <Textarea
+              id="edit-node-description"
+              v-model="editForm.description"
+              rows="2"
+              placeholder="节点描述"
+            />
+          </div>
+
+          <div class="stack stack--tight">
+            <Label>标签</Label>
+            <div class="cluster">
+              <Input
+                v-model="editTagInput"
+                type="text"
+                placeholder="输入标签后回车"
+                @keyup.enter.prevent="addEditTag"
+              />
+              <Button variant="secondary" type="button" @click="addEditTag">添加</Button>
+            </div>
+            <div v-if="editForm.tags.length" class="cluster">
+              <Badge v-for="tag in editForm.tags" :key="tag" variant="secondary" class="inline-gap">
+                {{ tag }}
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeEditTag(tag)">×</Button>
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeEditModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleUpdate">
+            {{ isSaving ? '保存中...' : '保存修改' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showDisableModal">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>禁用节点</DialogTitle>
+          <DialogDescription>
+            确认禁用 {{ selectedNode?.name || '该节点' }} 吗？禁用后节点将从可用列表下线。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeDisableModal">取消</Button>
+          <Button variant="destructive" type="button" :disabled="isSaving" @click="handleDisable">
+            {{ isSaving ? '处理中...' : '确认禁用' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showDeleteModal">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除节点</DialogTitle>
+          <DialogDescription>
+            确认删除 {{ selectedNode?.name || '该节点' }} 吗？此操作不可撤销。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeDeleteModal">取消</Button>
+          <Button variant="destructive" type="button" :disabled="isSaving" @click="handleDelete">
+            {{ isSaving ? '处理中...' : '确认删除' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
-

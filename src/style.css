@@ -556,6 +556,24 @@ a:hover {
   align-items: flex-start;
 }
 
+.traffic-input {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.traffic-input__value {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.traffic-input__unit {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  justify-content: center;
+}
+
 .form__field--offset {
   padding-top: 1.5rem;
 }

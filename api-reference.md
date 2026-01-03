@@ -240,7 +240,7 @@ METHOD\nPATH\nRAW_QUERY\nTIMESTAMP\nNONCE\nBASE64(BODY)
   - `password` string
   - `display_name` string（可选）
   - `invite_code` string（可选）
-- 备注：当 `Auth.Registration.InviteOnly=true` 时，必须提供 `invite_code`。
+- 备注：当 `Auth.Registration.InviteOnly=true` 时，必须提供 `invite_code`；缺失返回 `400`，未命中白名单返回 `403`。
 - 响应：
   - `requires_verification` bool
   - `access_token` string（可选）
@@ -368,8 +368,14 @@ AdminUserSummary 字段：
 
 NodeSummary 字段：
 
-- `id`、`name`、`region`、`country`、`isp`、`status`、`tags`、`protocols`
-- `capacity_mbps`、`description`、`last_synced_at`、`updated_at`
+- `id`、`name`、`region`、`country`、`isp`、`status`、`tags`
+- `capacity_mbps`、`description`、`access_address`、`control_endpoint`
+- `status_sync_enabled`（是否允许内核状态反向同步）
+- `last_synced_at`、`updated_at`
+备注：
+- `status` 为管理端维护字段，手动禁用时为 `disabled`；运行态健康度请看协议绑定健康状态。
+- 节点控制面必须配置 `control_endpoint`，不再回退全局 `Kernel.HTTP`。
+- 控制面鉴权优先级：`control_access_key` + `control_secret_key` → `control_token`（无全局兜底）
 
 #### POST /api/v1/{adminPrefix}/nodes
 
@@ -381,11 +387,19 @@ NodeSummary 字段：
   - `isp` string（可选）
   - `status` string（可选）
   - `tags` []string（可选）
-  - `protocols` []string（可选）
   - `capacity_mbps` int（可选）
   - `description` string（可选）
+  - `access_address` string（可选，客户端对外地址）
+  - `control_endpoint` string（必填，节点控制面地址）
+  - `control_access_key` string（可选，节点控制面 AK，写入不回显）
+  - `control_secret_key` string（可选，节点控制面 SK，写入不回显）
+  - `ak` string（可选，兼容字段，等同 control_access_key）
+  - `sk` string（可选，兼容字段，等同 control_secret_key）
+  - `control_token` string（可选，节点控制面鉴权 token，写入不回显）
+  - `status_sync_enabled` bool（可选，是否允许内核状态反向同步，默认 true）
 - 响应：
   - `node` NodeSummary
+注：`control_token` 可直接填写 `Basic <base64(ak:sk)>` 或 `Bearer <token>`，无前缀按 `Bearer` 处理。
 - 示例请求体：
 ```json
 {
@@ -395,9 +409,10 @@ NodeSummary 字段：
   "isp": "HKT",
   "status": "online",
   "tags": ["edge"],
-  "protocols": ["vless", "ss"],
   "capacity_mbps": 1000,
-  "description": "HK edge"
+  "description": "HK edge",
+  "access_address": "hk.example.com",
+  "control_endpoint": "https://kernel-hk.example.com/api"
 }
 ```
 
@@ -412,9 +427,16 @@ NodeSummary 字段：
   - `isp` string（可选）
   - `status` string（可选）
   - `tags` []string（可选）
-  - `protocols` []string（可选）
   - `capacity_mbps` int（可选）
   - `description` string（可选）
+  - `access_address` string（可选，客户端对外地址）
+  - `control_endpoint` string（可选，节点控制面地址）
+  - `control_access_key` string（可选，节点控制面 AK，写入不回显）
+  - `control_secret_key` string（可选，节点控制面 SK，写入不回显）
+  - `ak` string（可选，兼容字段，等同 control_access_key）
+  - `sk` string（可选，兼容字段，等同 control_secret_key）
+  - `control_token` string（可选，节点控制面鉴权 token，写入不回显）
+  - `status_sync_enabled` bool（可选，是否允许内核状态反向同步）
 - 响应：
   - `node` NodeSummary
 - 示例请求体：
@@ -426,9 +448,15 @@ NodeSummary 字段：
 }
 ```
 
+#### DELETE /api/v1/{adminPrefix}/nodes/{id}
+
+- 说明：删除节点（软删除，同时清理关联协议绑定与内核记录）
+- 路径参数：`id` uint64
+- 响应：`204 No Content`
+
 #### POST /api/v1/{adminPrefix}/nodes/{id}/disable
 
-- 说明：禁用节点（软删除）
+- 说明：禁用节点
 - 路径参数：`id` uint64
 - 响应：
   - `node` NodeSummary
@@ -451,7 +479,7 @@ NodeKernelSummary 字段：
 - 说明：触发节点与内核同步
 - 路径参数：`id` uint64
 - 请求体：
-  - `protocol` string（可选，空表示同步默认协议）
+  - `protocol` string（可选，空表示同步默认协议；当前仅支持 `http`）
 - 响应：
   - `node_id` uint64
   - `protocol` string
@@ -510,7 +538,8 @@ ProtocolConfigSummary 字段：
 ProtocolBindingSummary 字段：
 
 - `id`、`name`、`node_id`、`node_name`、`protocol_config_id`、`protocol`
-- `role`、`listen`、`connect`、`status`、`kernel_id`
+- `role`、`listen`、`connect`、`access_port`、`status`、`kernel_id`（字符串）
+- `kernel_id` 需与内核侧协议 ID 一致，通常不是数字
 - `sync_status`、`health_status`、`last_synced_at`、`last_heartbeat_at`、`last_sync_error`
 - `tags`、`description`、`metadata`
 - `created_at`、`updated_at`
@@ -524,8 +553,9 @@ ProtocolBindingSummary 字段：
   - `role` string
   - `listen` string（可选）
   - `connect` string（可选）
+  - `access_port` int（可选，客户端入口端口）
   - `status` string（可选）
-  - `kernel_id` string（可选）
+  - `kernel_id` string（必填，内核协议标识，通常为字符串）
   - `tags` []string（可选）
   - `description` string（可选）
   - `metadata` map（可选）
@@ -565,7 +595,7 @@ ProtocolBindingSummary 字段：
 #### GET /api/v1/{adminPrefix}/subscriptions
 
 - 说明：订阅列表
-- 查询参数：`page`、`per_page`、`q`、`status`、`user_id`、`plan_name`、`template_id`
+- 查询参数：`page`、`per_page`、`q`、`status`、`user_id`、`plan_name`、`plan_id`、`template_id`
 - 响应：
   - `subscriptions` []AdminSubscriptionSummary
   - `pagination` PaginationMeta
@@ -577,7 +607,7 @@ AdminSubscriptionUserSummary 字段：
 AdminSubscriptionSummary 字段：
 
 - `id`、`user`
-- `name`、`plan_name`、`status`
+- `name`、`plan_name`、`plan_id`、`plan_snapshot`、`status`
 - `template_id`、`available_template_ids`
 - `token`、`expires_at`
 - `traffic_total_bytes`、`traffic_used_bytes`
@@ -597,7 +627,8 @@ AdminSubscriptionSummary 字段：
 - 请求体：
   - `user_id` uint64
   - `name` string
-  - `plan_name` string
+  - `plan_name` string（可选）
+  - `plan_id` uint64
   - `status` string（可选）
   - `template_id` uint64
   - `available_template_ids` []uint64（可选）
@@ -614,7 +645,7 @@ AdminSubscriptionSummary 字段：
 - 说明：更新订阅
 - 路径参数：`id` uint64
 - 请求体（字段均可选）：
-  - `name`、`plan_name`、`status`
+  - `name`、`plan_name`、`plan_id`、`status`
   - `template_id`、`available_template_ids`
   - `token`、`expires_at`
   - `traffic_total_bytes`、`traffic_used_bytes`
@@ -656,7 +687,7 @@ TemplateVariable 字段：
 - `value_type` string
 - `required` bool
 - `description` string
-- `default_value` any
+- `default_value` interface{}
 
 SubscriptionTemplateSummary 字段：
 
@@ -734,8 +765,18 @@ SubscriptionTemplateHistoryEntry 字段：
 PlanSummary 字段：
 
 - `id`、`name`、`slug`、`description`、`tags`、`features`
+- `binding_ids`
+- `billing_options`
 - `price_cents`、`currency`、`duration_days`
 - `traffic_limit_bytes`、`traffic_multipliers`、`devices_limit`
+- `sort_order`、`status`、`visible`
+- `created_at`、`updated_at`
+
+PlanBillingOptionSummary 字段：
+
+- `id`、`plan_id`、`name`
+- `duration_value`、`duration_unit`
+- `price_cents`、`currency`
 - `sort_order`、`status`、`visible`
 - `created_at`、`updated_at`
 
@@ -748,6 +789,7 @@ PlanSummary 字段：
   - `description` string（可选）
   - `tags` []string（可选）
   - `features` []string（可选）
+  - `binding_ids` []uint64（可选，套餐绑定的协议）
   - `price_cents` int64
   - `currency` string
   - `duration_days` int
@@ -764,11 +806,44 @@ PlanSummary 字段：
 - 说明：更新套餐
 - 路径参数：`id` uint64
 - 请求体（字段均可选）：
-  - `name`、`slug`、`description`、`tags`、`features`
+  - `name`、`slug`、`description`、`tags`、`features`、`binding_ids`
   - `price_cents`、`currency`、`duration_days`
   - `traffic_limit_bytes`、`traffic_multipliers`、`devices_limit`
   - `sort_order`、`status`、`visible`
 - 响应：PlanSummary
+
+#### GET /api/v1/{adminPrefix}/plans/{plan_id}/billing-options
+
+- 说明：套餐计费选项列表
+- 路径参数：`plan_id` uint64
+- 查询参数：`status`（可选）、`visible`（可选）
+- 响应：
+  - `options` []PlanBillingOptionSummary
+
+#### POST /api/v1/{adminPrefix}/plans/{plan_id}/billing-options
+
+- 说明：创建套餐计费选项
+- 路径参数：`plan_id` uint64
+- 请求体：
+  - `name` string（可选）
+  - `duration_value` int
+  - `duration_unit` string（hour/day/month/year）
+  - `price_cents` int64
+  - `currency` string（可选）
+  - `sort_order` int（可选）
+  - `status` string（可选，默认 draft）
+  - `visible` bool（可选）
+- 响应：PlanBillingOptionSummary
+
+#### PATCH /api/v1/{adminPrefix}/plans/{plan_id}/billing-options/{id}
+
+- 说明：更新套餐计费选项
+- 路径参数：`plan_id` uint64、`id` uint64
+- 请求体（字段均可选）：
+  - `name`、`duration_value`、`duration_unit`
+  - `price_cents`、`currency`
+  - `sort_order`、`status`、`visible`
+- 响应：PlanBillingOptionSummary
 
 #### GET /api/v1/{adminPrefix}/coupons
 
@@ -1153,6 +1228,20 @@ AdminOrderDetail 字段：
 - 响应：
   - `status`
 
+### 公共订阅（免登录）
+
+#### GET /api/v1/subscriptions/{token}
+
+- 说明：客户端订阅拉取（免登录）
+- 路径参数：`token` string
+- 响应：**非 JSON**，直接返回订阅内容
+  - `Content-Type`：`text/plain` 或 `application/json`（取决于模板格式）
+  - `ETag`：内容哈希
+- 规则：
+  - 仅 `status=active` 且未过期的订阅可拉取
+  - `User-Agent` 关键词匹配客户端类型，忽略大小写；命中后优先选择对应 `client_type` 的默认模板
+  - 未命中则回退订阅默认模板
+
 ### 用户端（需要 user 权限）
 
 #### GET /api/v1/user/subscriptions
@@ -1160,13 +1249,16 @@ AdminOrderDetail 字段：
 - 说明：订阅列表
 - 查询参数：`page`、`per_page`、`sort`、`direction`、`q`、`status`
 - `sort` 可选：`name`、`plan_name`、`status`、`expires_at`、`created_at`
+- 说明：
+  - 用户侧默认不返回 `disabled` 状态订阅
+  - `expired` 状态仍会返回，便于续费
 - 响应：
   - `subscriptions` []UserSubscriptionSummary
   - `pagination` PaginationMeta
 
 UserSubscriptionSummary 字段：
 
-- `id`、`name`、`plan_name`、`status`
+- `id`、`name`、`plan_name`、`plan_id`、`status`
 - `template_id`、`available_template_ids`
 - `expires_at`、`traffic_total_bytes`、`traffic_used_bytes`
 - `devices_limit`、`last_refreshed_at`
@@ -1176,6 +1268,7 @@ UserSubscriptionSummary 字段：
 - 说明：订阅预览
 - 路径参数：`id` uint64
 - 查询参数：`template_id`（可选）
+- 说明：`disabled` 状态订阅返回 404
 - 响应：
   - `subscription_id` uint64
   - `template_id` uint64
@@ -1190,6 +1283,7 @@ UserSubscriptionSummary 字段：
 - 路径参数：`id` uint64
 - 请求体：
   - `template_id` uint64
+- 说明：`disabled` 状态订阅返回 404
 - 响应：
   - `subscription_id` uint64
   - `template_id` uint64
@@ -1201,6 +1295,7 @@ UserSubscriptionSummary 字段：
 - 路径参数：`id` uint64
 - 查询参数：`page`、`per_page`、`protocol`、`node_id`、`binding_id`、`from`、`to`
 - `from`/`to` 为 Unix 秒
+- 说明：`disabled` 状态订阅返回 404
 - 响应：
   - `summary` UserSubscriptionTrafficSummary
   - `records` []UserTrafficUsageRecord
@@ -1227,6 +1322,7 @@ UserTrafficUsageRecord 字段：
 UserPlanSummary 字段：
 
 - `id`、`name`、`description`、`features`
+- `billing_options`
 - `price_cents`、`currency`、`duration_days`
 - `traffic_limit_bytes`、`devices_limit`、`tags`
 
@@ -1241,7 +1337,7 @@ UserPlanSummary 字段：
 UserNodeStatusSummary 字段：
 
 - `id`、`name`、`region`、`country`、`isp`、`status`
-- `tags`、`protocols`、`capacity_mbps`、`description`
+- `tags`、`capacity_mbps`、`description`
 - `last_synced_at`、`updated_at`
 - `kernel_statuses` []UserNodeKernelStatusSummary
 - `protocol_statuses` []UserNodeProtocolStatusSummary
@@ -1271,7 +1367,6 @@ UserNodeProtocolStatusSummary 字段：
       "isp": "HKT",
       "status": "online",
       "tags": ["edge"],
-      "protocols": ["vless", "ss"],
       "capacity_mbps": 1000,
       "description": "HK edge",
       "last_synced_at": 1734001010,
@@ -1401,6 +1496,7 @@ UserPaymentChannelSummary 字段：
 - 说明：下单
 - 请求体：
   - `plan_id` uint64
+  - `billing_option_id` uint64（可选）
   - `quantity` int
   - `payment_method` string（可选，默认 `balance`；线下可用 `manual`）
   - `payment_channel` string（可选，外部支付通道）

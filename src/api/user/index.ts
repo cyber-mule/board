@@ -16,6 +16,7 @@ import type {
   UserSubscriptionPreview,
   UserSubscriptionSummary,
   UserSubscriptionTemplateUpdate,
+  UserSubscriptionTrafficResponse,
 } from '../types';
 
 type PaginationQuery = {
@@ -28,6 +29,14 @@ type UserSubscriptionsQuery = PaginationQuery & {
   direction?: string;
   q?: string;
   status?: string;
+};
+
+type UserSubscriptionTrafficQuery = PaginationQuery & {
+  protocol?: string;
+  node_id?: number;
+  binding_id?: number;
+  from?: number;
+  to?: number;
 };
 
 type UserAnnouncementsQuery = {
@@ -97,6 +106,12 @@ export function fetchUserSubscriptionPreview(id: number, templateId?: number) {
   );
 }
 
+export function fetchUserSubscriptionTraffic(id: number, query: UserSubscriptionTrafficQuery = {}) {
+  return requestJson<UserSubscriptionTrafficResponse>(
+    withQuery(userPath(`/subscriptions/${id}/traffic`), query),
+  );
+}
+
 export function updateUserSubscriptionTemplate(id: number, templateId: number) {
   return requestJson<UserSubscriptionTemplateUpdate>(
     userPath(`/subscriptions/${id}/template`),
@@ -125,6 +140,11 @@ export function fetchUserOrderDetail(id: number) {
   return requestJson<UserOrderDetailResponse>(userPath(`/orders/${id}`));
 }
 
-export function fetchUserOrderPaymentStatus(id: number) {
-  return requestJson<UserOrderPaymentStatusResponse>(userPath(`/orders/${id}/payment-status`));
+export function fetchUserOrderPaymentStatus(
+  id: number,
+  options: { toastOnError?: boolean } = {},
+) {
+  return requestJson<UserOrderPaymentStatusResponse>(userPath(`/orders/${id}/payment-status`), {
+    toastOnError: options.toastOnError,
+  });
 }

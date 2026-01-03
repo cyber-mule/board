@@ -123,7 +123,9 @@ export type AdminSubscriptionSummary = {
   id: number;
   user?: AdminSubscriptionUserSummary;
   name: string;
-  plan_name: string;
+  plan_name?: string;
+  plan_id?: number;
+  plan_snapshot?: Record<string, unknown>;
   status?: string;
   template_id?: number;
   available_template_ids?: number[];
@@ -146,7 +148,8 @@ export type AdminSubscriptionResponse = {
 export type CreateAdminSubscriptionRequest = {
   user_id: number;
   name: string;
-  plan_name: string;
+  plan_name?: string;
+  plan_id: number;
   status?: string;
   template_id: number;
   available_template_ids?: number[];
@@ -160,6 +163,7 @@ export type CreateAdminSubscriptionRequest = {
 export type UpdateAdminSubscriptionRequest = {
   name?: string;
   plan_name?: string;
+  plan_id?: number;
   status?: string;
   template_id?: number;
   available_template_ids?: number[];
@@ -188,9 +192,10 @@ export type NodeSummary = {
   isp?: string;
   status?: string;
   tags?: string[];
-  protocols?: string[];
   capacity_mbps?: number;
   description?: string;
+  access_address?: string;
+  control_endpoint?: string;
   last_synced_at?: number;
   updated_at?: number;
 };
@@ -204,10 +209,154 @@ export type NodeKernelSummary = {
   last_synced_at?: number;
 };
 
+export type Node = NodeSummary & {
+  location?: string;
+  load_percent?: number;
+  online_user_count?: number;
+  traffic_rate_mbps?: number;
+  created_at?: number;
+  kernels?: NodeKernelSummary[];
+  protocols?: string[];
+};
+
+export type NodeResponse = {
+  node: NodeSummary;
+};
+
+export type CreateNodeRequest = {
+  name: string;
+  region?: string;
+  country?: string;
+  isp?: string;
+  tags?: string[];
+  capacity_mbps?: number;
+  description?: string;
+  access_address?: string;
+  control_endpoint: string;
+  control_token?: string;
+  control_access_key?: string;
+  control_secret_key?: string;
+};
+
+export type UpdateNodeRequest = {
+  name?: string;
+  region?: string;
+  country?: string;
+  isp?: string;
+  tags?: string[];
+  capacity_mbps?: number;
+  description?: string;
+  access_address?: string;
+  control_endpoint?: string;
+  control_token?: string;
+  control_access_key?: string;
+  control_secret_key?: string;
+};
+
 export type SyncNodeKernelsResponse = {
   node_id: number;
-  synced_count: number;
-  kernels: NodeKernelSummary[];
+  protocol?: string;
+  revision?: string;
+  synced_at?: number;
+  message?: string;
+  synced_count?: number;
+  kernels?: NodeKernelSummary[];
+};
+
+export type ProtocolConfigSummary = {
+  id: number;
+  name: string;
+  protocol: string;
+  status?: string;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type CreateProtocolConfigRequest = {
+  name: string;
+  protocol: string;
+  status?: string;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+};
+
+export type UpdateProtocolConfigRequest = {
+  name?: string;
+  protocol?: string;
+  status?: string;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+};
+
+export type ProtocolBindingSummary = {
+  id: number;
+  name?: string;
+  node_id?: number;
+  node_name?: string;
+  protocol_config_id?: number;
+  protocol?: string;
+  role?: string;
+  listen?: string;
+  connect?: string;
+  access_port?: number;
+  status?: string;
+  kernel_id?: string;
+  sync_status?: string;
+  health_status?: string;
+  last_synced_at?: number;
+  last_heartbeat_at?: number;
+  last_sync_error?: string;
+  tags?: string[];
+  description?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type CreateProtocolBindingRequest = {
+  name?: string;
+  node_id: number;
+  protocol_config_id: number;
+  role: string;
+  listen?: string;
+  connect?: string;
+  access_port?: number;
+  status?: string;
+  kernel_id: string;
+  tags?: string[];
+  description?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type UpdateProtocolBindingRequest = {
+  name?: string;
+  node_id?: number;
+  protocol_config_id?: number;
+  role?: string;
+  listen?: string;
+  connect?: string;
+  access_port?: number;
+  status?: string;
+  kernel_id?: string;
+  tags?: string[];
+  description?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProtocolBindingSyncResult = {
+  binding_id: number;
+  status: string;
+  message?: string;
+  synced_at?: number;
+};
+
+export type ProtocolBindingSyncResponse = {
+  results: ProtocolBindingSyncResult[];
 };
 
 export type PlanSummary = {
@@ -217,10 +366,12 @@ export type PlanSummary = {
   description?: string;
   tags?: string[];
   features?: string[];
+  binding_ids?: number[];
   price_cents: number;
   currency: string;
   duration_days: number;
   traffic_limit_bytes?: number;
+  traffic_multipliers?: Record<string, number>;
   devices_limit?: number;
   sort_order?: number;
   status?: string;
@@ -235,10 +386,12 @@ export type CreatePlanRequest = {
   description?: string;
   tags?: string[];
   features?: string[];
+  binding_ids?: number[];
   price_cents: number;
   currency: string;
   duration_days: number;
   traffic_limit_bytes?: number;
+  traffic_multipliers?: Record<string, number>;
   devices_limit?: number;
   sort_order?: number;
   status?: string;
@@ -251,14 +404,21 @@ export type UpdatePlanRequest = {
   description?: string;
   tags?: string[];
   features?: string[];
+  binding_ids?: number[];
   price_cents?: number;
   currency?: string;
   duration_days?: number;
   traffic_limit_bytes?: number;
+  traffic_multipliers?: Record<string, number>;
   devices_limit?: number;
   sort_order?: number;
   status?: string;
   visible?: boolean;
+};
+
+export type Plan = PlanSummary & {
+  device_limit?: number;
+  is_visible?: boolean;
 };
 
 export type PaymentChannelSummary = {
@@ -613,6 +773,30 @@ export type UserSubscriptionTemplateUpdate = {
   subscription_id: number;
   template_id: number;
   updated_at: number;
+};
+
+export type UserSubscriptionTrafficSummary = {
+  raw_bytes: number;
+  charged_bytes: number;
+};
+
+export type UserTrafficUsageRecord = {
+  id: number;
+  protocol?: string;
+  node_id?: number;
+  binding_id?: number;
+  bytes_up: number;
+  bytes_down: number;
+  raw_bytes: number;
+  charged_bytes: number;
+  multiplier?: number;
+  observed_at: number;
+};
+
+export type UserSubscriptionTrafficResponse = {
+  summary: UserSubscriptionTrafficSummary;
+  records: UserTrafficUsageRecord[];
+  pagination: PaginationMeta;
 };
 
 export type CreateUserOrderRequest = {

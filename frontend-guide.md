@@ -22,6 +22,11 @@
 - 管理端：`${API_BASE_URL}/api/v1/${ADMIN_PREFIX}`
 - 用户端：`${API_BASE_URL}/api/v1/user`
 
+跨域提示：
+
+- 前后端分离部署时，需要在后端配置 `CORS` 允许前端域名访问。
+- 推荐在 `etc/znp-*.yaml` 中配置 `CORS.AllowOrigins` 与 `CORS.AllowHeaders`。
+
 ## 3. API 客户端设计
 
 推荐封装统一的请求层：
@@ -123,7 +128,7 @@ async function request(url, options = {}) {
 
 - `POST /api/v1/{adminPrefix}/nodes/{id}/kernels/sync`
 - 请求体（可选）：
-  - `protocol` string（空表示默认协议）
+- `protocol` string（可选，空表示默认协议；当前仅支持 `http`）
 
 示例：
 
@@ -131,7 +136,7 @@ async function request(url, options = {}) {
 POST /api/v1/admin/nodes/42/kernels/sync
 Content-Type: application/json
 
-{"protocol":"http"}
+{}
 ```
 
 响应字段：
@@ -182,6 +187,12 @@ Content-Type: application/json
 
 - `status=synced` 表示下发成功
 - `status=error` 表示失败（`message` 描述原因）
+- 创建协议绑定时必须提供 `kernel_id`（字符串），应与内核侧协议 ID 保持一致
+- 节点必须配置 `control_endpoint`，下发仅使用节点控制面地址
+- 鉴权优先级：`control_access_key` + `control_secret_key` → `control_token`（无全局兜底）
+- 兼容字段：`ak`/`sk` 等价于 `control_access_key`/`control_secret_key`
+- 可选字段：`status_sync_enabled`（是否允许内核状态反向同步，默认 true）
+- `control_token` 可直接填 `Basic <base64(ak:sk)>` 或 `Bearer <token>`，无前缀按 `Bearer` 处理
 
 ### 6.3 用户侧节点状态
 
@@ -190,10 +201,12 @@ Content-Type: application/json
 
 关键字段说明：
 
-- `nodes[].status`：节点状态（`online`/`offline`/`maintenance`/`disabled`）
+- `nodes[].status`：管理端状态（手动禁用为 `disabled`）；运行态健康度请看 `protocol_statuses[].health_status`
 - `kernel_statuses[]`：节点同步摘要（来自最近一次同步记录）
 - `protocol_statuses[]`：协议绑定健康状态
   - `health_status`：`healthy`/`degraded`/`unhealthy`/`offline`/`unknown`
+- 节点范围来自当前生效订阅（`active` 且未过期）绑定的协议；无生效订阅时返回空数组
+- `protocol` 过滤时仅在套餐允许的协议绑定中筛选
 
 提示：`kernel_statuses` 表示同步记录状态，不是实时心跳。
 
@@ -201,6 +214,7 @@ Content-Type: application/json
 
 - `GET /api/v1/user/subscriptions/{id}/preview`
 - 查询参数：`template_id`（可选）
+  - 用户侧订阅列表默认不返回 `disabled` 状态，`expired` 仍可展示用于续费
 
 响应字段：
 
@@ -218,6 +232,27 @@ Content-Type: application/json
 
 - `nodes`/`protocol_bindings` 输出为空数组
 - `user_identity` 字段为空字符串
+  - `status=disabled` 时接口返回 `404`
+
+当订阅 `status = active` 时：
+
+- `nodes`/`protocol_bindings` 仅包含套餐绑定的协议
+  - `nodes[].access_address` / `nodes[].access_port` 作为客户端入口地址优先使用
+  - 为空时回退到 `listen`/`connect`
+
+模板变量中的套餐快照字段：
+
+- `subscription.plan_snapshot`：套餐快照（含 `binding_ids`、`traffic_multipliers` 等），用于保证订阅长期一致性
+
+### 6.5 订阅拉取地址（客户端）
+
+- `GET /api/v1/subscriptions/{token}`
+- 根据 `User-Agent` 自动选择模板：
+  - 命中 `clash` 相关客户端 → `client_type=clash`
+  - 命中 `sing-box` 客户端 → `client_type=sing-box`
+  - 常见识别关键字：`mihomo`、`clash-verge`、`surge`、`quantumult`、`stash`、`shadowrocket`、`loon`、`nekobox`、`v2rayn`、`v2rayng`
+- 未识别则回退订阅默认模板
+- 订阅非 `active` 或已过期时返回 `404`
 
 ## 7. 数据格式与展示建议
 

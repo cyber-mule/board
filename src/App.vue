@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { Button } from '@/components/ui/button'
+import { ToastHost } from '@/components/ui/toast'
 </script>
 
 <template>
@@ -48,5 +49,6 @@ import { Button } from '@/components/ui/button'
     <main class="app__main">
       <RouterView />
     </main>
+    <ToastHost />
   </div>
 </template>

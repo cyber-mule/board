@@ -64,6 +64,7 @@ const filters = reactive({
   status: '',
   user_id: '',
   plan_name: '',
+  plan_id: '',
   template_id: '',
   sort: 'updated_at',
   direction: 'desc',
@@ -79,6 +80,7 @@ const createForm = reactive({
   user_id: null as number | null,
   name: '',
   plan_name: '',
+  plan_id: null as number | null,
   status: 'active',
   template_id: null as number | null,
   available_template_ids: '',
@@ -92,6 +94,7 @@ const createForm = reactive({
 const editForm = reactive({
   name: '',
   plan_name: '',
+  plan_id: null as number | null,
   status: 'active',
   template_id: null as number | null,
   available_template_ids: '',
@@ -194,6 +197,7 @@ async function loadSubscriptions() {
       status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
       user_id: filters.user_id ? Number(filters.user_id) : undefined,
       plan_name: filters.plan_name || undefined,
+      plan_id: filters.plan_id ? Number(filters.plan_id) : undefined,
       template_id: filters.template_id ? Number(filters.template_id) : undefined,
       sort: filters.sort,
       direction: filters.direction,
@@ -227,6 +231,7 @@ async function loadMore() {
       status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
       user_id: filters.user_id ? Number(filters.user_id) : undefined,
       plan_name: filters.plan_name || undefined,
+      plan_id: filters.plan_id ? Number(filters.plan_id) : undefined,
       template_id: filters.template_id ? Number(filters.template_id) : undefined,
       sort: filters.sort,
       direction: filters.direction,
@@ -246,6 +251,7 @@ function resetFilters() {
   filters.status = '';
   filters.user_id = '';
   filters.plan_name = '';
+  filters.plan_id = '';
   filters.template_id = '';
   filters.sort = 'updated_at';
   filters.direction = 'desc';
@@ -256,6 +262,7 @@ function openCreateModal() {
   createForm.user_id = null;
   createForm.name = '';
   createForm.plan_name = '';
+  createForm.plan_id = null;
   createForm.status = 'active';
   createForm.template_id = null;
   createForm.available_template_ids = '';
@@ -278,8 +285,8 @@ async function handleCreate() {
     actionError.value = '请输入用户 ID。';
     return;
   }
-  if (!createForm.name || !createForm.plan_name) {
-    actionError.value = '请填写订阅名称与套餐名称。';
+  if (!createForm.name || !toOptionalNumber(createForm.plan_id)) {
+    actionError.value = '请填写订阅名称与套餐 ID。';
     return;
   }
   if (!toOptionalNumber(createForm.template_id)) {
@@ -305,7 +312,8 @@ async function handleCreate() {
     const payload: CreateAdminSubscriptionRequest = {
       user_id: toOptionalNumber(createForm.user_id) ?? 0,
       name: createForm.name,
-      plan_name: createForm.plan_name,
+      plan_name: createForm.plan_name || undefined,
+      plan_id: toOptionalNumber(createForm.plan_id) ?? 0,
       status: createForm.status || undefined,
       template_id: toOptionalNumber(createForm.template_id) ?? 0,
       available_template_ids: parseIdList(createForm.available_template_ids),
@@ -333,6 +341,7 @@ function openEditModal() {
   const subscription = selectedSubscription.value;
   editForm.name = subscription.name || '';
   editForm.plan_name = subscription.plan_name || '';
+  editForm.plan_id = subscription.plan_id ?? null;
   editForm.status = subscription.status || 'active';
   editForm.template_id = subscription.template_id ?? null;
   editForm.available_template_ids = (subscription.available_template_ids ?? []).join(', ');
@@ -360,6 +369,7 @@ async function handleUpdate() {
     const payload: UpdateAdminSubscriptionRequest = {
       name: editForm.name || undefined,
       plan_name: editForm.plan_name || undefined,
+      plan_id: toOptionalNumber(editForm.plan_id),
       status: editForm.status || undefined,
       template_id: toOptionalNumber(editForm.template_id),
       available_template_ids: parseIdList(editForm.available_template_ids),
@@ -513,6 +523,10 @@ onMounted(() => {
         <Input v-model="filters.plan_name" type="text" placeholder="Plan name" />
       </div>
       <div class="stack stack--tight">
+        <Label>套餐 ID</Label>
+        <Input v-model="filters.plan_id" type="number" placeholder="套餐 ID" />
+      </div>
+      <div class="stack stack--tight">
         <Label>模板 ID</Label>
         <Input v-model="filters.template_id" type="number" placeholder="模板 ID" />
       </div>
@@ -582,7 +596,8 @@ onMounted(() => {
             >
               <div class="cursor-pointer" @click="selectedSubscriptionId = subscription.id">
                 <p class="data-row__title">
-                  {{ subscription.name }} · {{ subscription.plan_name }}
+                  {{ subscription.name }} ·
+                  {{ subscription.plan_name || (subscription.plan_id ? `套餐 #${subscription.plan_id}` : '-') }}
                 </p>
                 <p class="data-row__meta">
                   用户 {{ subscription.user?.email || subscription.user?.display_name || '-' }} ·
@@ -644,7 +659,13 @@ onMounted(() => {
               </div>
               <div>
                 <p class="detail-label">套餐</p>
-                <p class="detail-value">{{ selectedSubscription.plan_name }}</p>
+                <p class="detail-value">
+                  {{ selectedSubscription.plan_name || '-' }}
+                </p>
+              </div>
+              <div>
+                <p class="detail-label">套餐 ID</p>
+                <p class="detail-value">{{ selectedSubscription.plan_id ?? '-' }}</p>
               </div>
               <div>
                 <p class="detail-label">Token</p>
@@ -705,9 +726,15 @@ onMounted(() => {
             <Label>订阅名称 *</Label>
             <Input v-model="createForm.name" type="text" placeholder="Subscription name" />
           </div>
-          <div class="stack stack--tight">
-            <Label>套餐名称 *</Label>
-            <Input v-model="createForm.plan_name" type="text" placeholder="Plan name" />
+          <div class="detail-grid">
+            <div class="stack stack--tight">
+              <Label>套餐 ID *</Label>
+              <Input v-model.number="createForm.plan_id" type="number" placeholder="套餐 ID" />
+            </div>
+            <div class="stack stack--tight">
+              <Label>套餐名称</Label>
+              <Input v-model="createForm.plan_name" type="text" placeholder="Plan name" />
+            </div>
           </div>
           <div class="stack stack--tight">
             <Label>状态</Label>
@@ -774,9 +801,15 @@ onMounted(() => {
             <Label>订阅名称</Label>
             <Input v-model="editForm.name" type="text" placeholder="订阅名称" />
           </div>
-          <div class="stack stack--tight">
-            <Label>套餐名称</Label>
-            <Input v-model="editForm.plan_name" type="text" placeholder="Plan name" />
+          <div class="detail-grid">
+            <div class="stack stack--tight">
+              <Label>套餐 ID</Label>
+              <Input v-model.number="editForm.plan_id" type="number" placeholder="套餐 ID" />
+            </div>
+            <div class="stack stack--tight">
+              <Label>套餐名称</Label>
+              <Input v-model="editForm.plan_name" type="text" placeholder="Plan name" />
+            </div>
           </div>
           <div class="stack stack--tight">
             <Label>状态</Label>

@@ -10,6 +10,9 @@ import type {
   AdminUserSummary,
   AnnouncementSummary,
   CancelOrderRequest,
+  CreateNodeRequest,
+  CreateProtocolBindingRequest,
+  CreateProtocolConfigRequest,
   CreateAdminSubscriptionRequest,
   CreateAdminUserRequest,
   CreateAnnouncementRequest,
@@ -21,11 +24,16 @@ import type {
   MessageResponse,
   NodeKernelSummary,
   NodeSummary,
+  NodeResponse,
   PaginationMeta,
   PayOrderRequest,
   PaymentChannelResponse,
   PaymentChannelSummary,
   PlanSummary,
+  ProtocolBindingSummary,
+  ProtocolBindingSyncResponse,
+  ProtocolBindingSyncResult,
+  ProtocolConfigSummary,
   PublishAnnouncementRequest,
   PublishTemplateRequest,
   PublishTemplateResponse,
@@ -41,10 +49,13 @@ import type {
   UpdateAdminSubscriptionRequest,
   UpdatePaymentChannelRequest,
   UpdatePlanRequest,
+  UpdateProtocolBindingRequest,
+  UpdateProtocolConfigRequest,
   UpdateSecuritySettingsRequest,
   UpdateTemplateRequest,
   UpdateUserRolesRequest,
   UpdateUserStatusRequest,
+  UpdateNodeRequest,
 } from '../types';
 
 type PaginationQuery = {
@@ -58,6 +69,24 @@ type AdminNodesQuery = PaginationQuery & {
   q?: string;
   status?: string;
   protocol?: string;
+};
+
+type AdminProtocolBindingsQuery = PaginationQuery & {
+  sort?: string;
+  direction?: string;
+  q?: string;
+  status?: string;
+  protocol?: string;
+  node_id?: number;
+  protocol_config_id?: number;
+};
+
+type AdminProtocolConfigsQuery = PaginationQuery & {
+  sort?: string;
+  direction?: string;
+  q?: string;
+  protocol?: string;
+  status?: string;
 };
 
 type AdminPlansQuery = PaginationQuery & {
@@ -117,6 +146,7 @@ type AdminSubscriptionsQuery = PaginationQuery & {
   status?: string;
   user_id?: number;
   plan_name?: string;
+  plan_id?: number;
   template_id?: number;
 };
 
@@ -212,15 +242,107 @@ export function fetchAdminNodes(query: AdminNodesQuery = {}) {
   );
 }
 
+export function fetchAdminProtocolConfigs(query: AdminProtocolConfigsQuery = {}) {
+  return requestJson<PaginatedResponse<{ configs: ProtocolConfigSummary[] }>>(
+    withQuery(adminPath('/protocol-configs'), query),
+  );
+}
+
+export function createAdminProtocolConfig(payload: CreateProtocolConfigRequest) {
+  return requestJson<{ config: ProtocolConfigSummary }>(adminPath('/protocol-configs'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminProtocolConfig(id: number, payload: UpdateProtocolConfigRequest) {
+  return requestJson<{ config: ProtocolConfigSummary }>(adminPath(`/protocol-configs/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function deleteAdminProtocolConfig(id: number) {
+  return requestJson<void>(adminPath(`/protocol-configs/${id}`), {
+    method: 'DELETE',
+  });
+}
+
+export function fetchAdminProtocolBindings(query: AdminProtocolBindingsQuery = {}) {
+  return requestJson<PaginatedResponse<{ bindings: ProtocolBindingSummary[] }>>(
+    withQuery(adminPath('/protocol-bindings'), query),
+  );
+}
+
+export function createAdminProtocolBinding(payload: CreateProtocolBindingRequest) {
+  return requestJson<{ binding: ProtocolBindingSummary }>(adminPath('/protocol-bindings'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminProtocolBinding(id: number, payload: UpdateProtocolBindingRequest) {
+  return requestJson<{ binding: ProtocolBindingSummary }>(adminPath(`/protocol-bindings/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function deleteAdminProtocolBinding(id: number) {
+  return requestJson<void>(adminPath(`/protocol-bindings/${id}`), {
+    method: 'DELETE',
+  });
+}
+
+export function syncAdminProtocolBinding(id: number) {
+  return requestJson<ProtocolBindingSyncResult>(adminPath(`/protocol-bindings/${id}/sync`), {
+    method: 'POST',
+  });
+}
+
+export function syncAdminProtocolBindings(payload: { binding_ids?: number[]; node_ids?: number[] }) {
+  return requestJson<ProtocolBindingSyncResponse>(adminPath('/protocol-bindings/sync'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function createAdminNode(payload: CreateNodeRequest) {
+  return requestJson<NodeResponse>(adminPath('/nodes'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminNode(id: number, payload: UpdateNodeRequest) {
+  return requestJson<NodeResponse>(adminPath(`/nodes/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function disableAdminNode(id: number) {
+  return requestJson<NodeResponse>(adminPath(`/nodes/${id}/disable`), {
+    method: 'POST',
+  });
+}
+
+export function deleteAdminNode(id: number) {
+  return requestJson<void>(adminPath(`/nodes/${id}`), {
+    method: 'DELETE',
+  });
+}
+
 export function fetchAdminNodeKernels(id: number) {
   return requestJson<{ node_id: number; kernels: NodeKernelSummary[] }>(
     adminPath(`/nodes/${id}/kernels`),
   );
 }
 
-export function syncNodeKernels(id: number) {
+export function syncNodeKernels(id: number, payload?: { protocol?: string }) {
   return requestJson<SyncNodeKernelsResponse>(adminPath(`/nodes/${id}/kernels/sync`), {
     method: 'POST',
+    json: payload,
   });
 }
 

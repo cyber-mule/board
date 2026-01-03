@@ -12,6 +12,8 @@ import {
   mockOrders,
   mockAnnouncements,
   mockNodes,
+  mockProtocolConfigs,
+  mockProtocolBindings,
   mockTemplates,
   mockPaymentChannels,
   mockSecuritySettings,
@@ -45,7 +47,13 @@ import type {
   CreatePlanRequest,
   UpdatePlanRequest,
   CreateAnnouncementRequest,
+  CreateNodeRequest,
+  CreateProtocolBindingRequest,
+  CreateProtocolConfigRequest,
   UpdateAnnouncementRequest,
+  UpdateNodeRequest,
+  UpdateProtocolBindingRequest,
+  UpdateProtocolConfigRequest,
   PublishAnnouncementRequest,
   CreateTemplateRequest,
   UpdateTemplateRequest,
@@ -56,6 +64,7 @@ import type {
   PayOrderRequest,
   CancelOrderRequest,
   ExtendAdminSubscriptionRequest,
+  UserTrafficUsageRecord,
   ResetUserPasswordRequest,
   UpdateSecuritySettingsRequest,
   UpdateAdminSubscriptionRequest,
@@ -65,6 +74,7 @@ import type {
 
 // Simulate network delay
 const MOCK_DELAY = 300;
+const subscriptionTrafficCache = new Map<number, UserTrafficUsageRecord[]>();
 
 function delay(ms: number = MOCK_DELAY): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -225,6 +235,7 @@ function buildSubscriptionSummary(subscription: UserSubscription) {
     id: subscriptionValue.id,
     name: subscriptionValue.name ?? plan?.name ?? `Subscription ${subscription.id}`,
     plan_name: subscriptionValue.plan_name ?? plan?.name,
+    plan_id: subscriptionValue.plan_id ?? plan?.id,
     status: subscriptionValue.status,
     template_id: templateId,
     available_template_ids: resolvedTemplateIds,
@@ -272,6 +283,7 @@ function buildAdminSubscriptionSummary(subscription: UserSubscription): AdminSub
       : undefined,
     name: subscriptionValue.name ?? plan?.name ?? `Subscription ${subscription.id}`,
     plan_name: subscriptionValue.plan_name ?? plan?.name ?? '-',
+    plan_id: subscriptionValue.plan_id ?? plan?.id,
     status: subscriptionValue.status,
     template_id: templateId,
     available_template_ids: resolvedTemplateIds,
@@ -286,6 +298,44 @@ function buildAdminSubscriptionSummary(subscription: UserSubscription): AdminSub
     created_at: subscriptionValue.created_at,
     updated_at: subscriptionValue.updated_at,
   };
+}
+
+function buildSubscriptionTrafficRecords(subscriptionId: number): UserTrafficUsageRecord[] {
+  const cached = subscriptionTrafficCache.get(subscriptionId);
+  if (cached) {
+    return cached;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const protocols = ['http', 'tls', 'grpc'];
+  const records: UserTrafficUsageRecord[] = [];
+
+  for (let i = 0; i < 48; i += 1) {
+    const protocol = protocols[i % protocols.length];
+    const nodeId = 100 + ((subscriptionId + i) % 4) + 1;
+    const bindingId = 200 + ((subscriptionId * 3 + i) % 5) + 1;
+    const bytesUp = 2_000_000 + ((subscriptionId + 1) * (i + 3) * 12345) % 8_000_000;
+    const bytesDown = 3_000_000 + ((subscriptionId + 2) * (i + 5) * 23456) % 12_000_000;
+    const rawBytes = bytesUp + bytesDown;
+    const multiplier = protocol === 'tls' ? 1.2 : protocol === 'grpc' ? 1.1 : 1;
+    const chargedBytes = Math.round(rawBytes * multiplier);
+
+    records.push({
+      id: subscriptionId * 1000 + i + 1,
+      protocol,
+      node_id: nodeId,
+      binding_id: bindingId,
+      bytes_up: bytesUp,
+      bytes_down: bytesDown,
+      raw_bytes: rawBytes,
+      charged_bytes: chargedBytes,
+      multiplier,
+      observed_at: now - i * 6 * 60 * 60,
+    });
+  }
+
+  subscriptionTrafficCache.set(subscriptionId, records);
+  return records;
 }
 
 function buildBalanceSnapshot(user: { id: number; balance_cents?: number }) {
@@ -604,6 +654,56 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/user/subscriptions/{id}/traffic`)) {
+    if (method === 'GET' && currentUser) {
+      const id = extractId(url, `${API_PREFIX}/user/subscriptions/{id}/traffic`);
+      const subscription = mockSubscriptions.find(
+        (item) => item.id === id && item.user_id === currentUser.id,
+      );
+      if (!subscription) return mockError('Subscription not found', 404);
+
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const protocol = query?.get('protocol')?.trim() || undefined;
+      const nodeId = Number(query?.get('node_id') ?? '');
+      const bindingId = Number(query?.get('binding_id') ?? '');
+      const from = Number(query?.get('from') ?? '');
+      const to = Number(query?.get('to') ?? '');
+
+      let records = buildSubscriptionTrafficRecords(id);
+
+      if (protocol) {
+        records = records.filter((record) => record.protocol === protocol);
+      }
+      if (Number.isFinite(nodeId) && nodeId > 0) {
+        records = records.filter((record) => record.node_id === nodeId);
+      }
+      if (Number.isFinite(bindingId) && bindingId > 0) {
+        records = records.filter((record) => record.binding_id === bindingId);
+      }
+      if (Number.isFinite(from) && from > 0) {
+        records = records.filter((record) => record.observed_at >= from);
+      }
+      if (Number.isFinite(to) && to > 0) {
+        records = records.filter((record) => record.observed_at <= to);
+      }
+
+      const summary = records.reduce(
+        (acc, record) => ({
+          raw_bytes: acc.raw_bytes + record.raw_bytes,
+          charged_bytes: acc.charged_bytes + record.charged_bytes,
+        }),
+        { raw_bytes: 0, charged_bytes: 0 },
+      );
+      const { data, pagination } = paginate(records, url);
+      return mockResponse({
+        summary,
+        records: data,
+        pagination,
+      });
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/user/plans`)) {
     if (method === 'GET') {
       const visiblePlans = mockPlans
@@ -869,6 +969,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             route: '/admin/nodes',
           },
           {
+            key: 'protocols',
+            name: 'Protocols',
+            description: 'Manage protocol configs and bindings.',
+            route: '/admin/protocols',
+          },
+          {
             key: 'plans',
             name: 'Plans',
             description: 'Manage pricing plans and availability.',
@@ -1043,6 +1149,7 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       const status = query?.get('status')?.trim();
       const userId = Number(query?.get('user_id') ?? '');
       const planName = query?.get('plan_name')?.trim().toLowerCase();
+      const planId = Number(query?.get('plan_id') ?? '');
       const templateId = Number(query?.get('template_id') ?? '');
 
       let list = mockSubscriptions.map(buildAdminSubscriptionSummary);
@@ -1062,8 +1169,11 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       }
       if (planName) {
         list = list.filter((subscription) =>
-          subscription.plan_name.toLowerCase().includes(planName),
+          (subscription.plan_name?.toLowerCase() ?? '').includes(planName),
         );
+      }
+      if (Number.isFinite(planId) && planId > 0) {
+        list = list.filter((subscription) => subscription.plan_id === planId);
       }
       if (Number.isFinite(templateId) && templateId > 0) {
         list = list.filter((subscription) => subscription.template_id === templateId);
@@ -1078,12 +1188,14 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
 
     if (method === 'POST') {
       const data = body as CreateAdminSubscriptionRequest;
+      if (!data?.plan_id) return mockError('Plan id is required', 400);
       const createdAt = Date.now();
       const newSubscription = {
         id: generateId(),
         user_id: data.user_id,
         name: data.name,
         plan_name: data.plan_name,
+        plan_id: data.plan_id,
         status: data.status ?? 'active',
         template_id: data.template_id,
         available_template_ids: data.available_template_ids,
@@ -1128,6 +1240,7 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         ...current,
         name: data.name ?? current.name,
         plan_name: data.plan_name ?? current.plan_name,
+        plan_id: data.plan_id ?? current.plan_id,
         status: data.status ?? current.status,
         template_id: data.template_id ?? current.template_id,
         available_template_ids: data.available_template_ids ?? current.available_template_ids,
@@ -1663,6 +1776,292 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const protocol = query?.get('protocol')?.trim().toLowerCase();
+      const status = query?.get('status')?.trim().toLowerCase();
+
+      let list = [...mockProtocolConfigs];
+
+      if (q) {
+        list = list.filter((config) => {
+          const haystack = [
+            config.name,
+            config.protocol,
+            String(config.id),
+            ...(config.tags || []),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(q);
+        });
+      }
+
+      if (protocol) {
+        list = list.filter((config) => config.protocol.toLowerCase() === protocol);
+      }
+
+      if (status) {
+        list = list.filter((config) => (config.status || '').toLowerCase() === status);
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({
+        configs: data,
+        pagination,
+      });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateProtocolConfigRequest;
+
+      if (!data?.name || !data.protocol) {
+        return mockError('Config name and protocol are required', 400);
+      }
+
+      const newConfig = {
+        id: generateId(),
+        name: data.name,
+        protocol: data.protocol,
+        status: data.status ?? 'active',
+        tags: data.tags ?? [],
+        description: data.description,
+        profile: data.profile,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+      };
+
+      mockProtocolConfigs.unshift(newConfig);
+      return mockResponse({ config: newConfig }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs/{id}`);
+
+    if (method === 'PATCH') {
+      const data = body as UpdateProtocolConfigRequest;
+      const index = mockProtocolConfigs.findIndex((config) => config.id === id);
+      if (index === -1) return mockError('Protocol config not found', 404);
+
+      if (data?.name !== undefined && !data.name) {
+        return mockError('Config name is required', 400);
+      }
+
+      if (data?.protocol !== undefined && !data.protocol) {
+        return mockError('Protocol is required', 400);
+      }
+
+      mockProtocolConfigs[index] = {
+        ...mockProtocolConfigs[index],
+        ...data,
+        tags: data.tags ?? mockProtocolConfigs[index].tags ?? [],
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ config: mockProtocolConfigs[index] });
+    }
+
+    if (method === 'DELETE') {
+      const index = mockProtocolConfigs.findIndex((config) => config.id === id);
+      if (index === -1) return mockError('Protocol config not found', 404);
+      mockProtocolConfigs.splice(index, 1);
+      return mockResponse({}, 204);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const protocol = query?.get('protocol')?.trim().toLowerCase();
+      const status = query?.get('status')?.trim().toLowerCase();
+      const nodeId = Number(query?.get('node_id') ?? '');
+      const configId = Number(query?.get('protocol_config_id') ?? '');
+
+      let list = [...mockProtocolBindings];
+
+      if (q) {
+        list = list.filter((binding) => {
+          const haystack = [
+            binding.name,
+            binding.node_name,
+            binding.protocol,
+            String(binding.id),
+            binding.node_id ? String(binding.node_id) : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(q);
+        });
+      }
+
+      if (protocol) {
+        list = list.filter((binding) => (binding.protocol || '').toLowerCase() === protocol);
+      }
+
+      if (status) {
+        list = list.filter((binding) => (binding.status || '').toLowerCase() === status);
+      }
+
+      if (Number.isFinite(nodeId) && nodeId > 0) {
+        list = list.filter((binding) => binding.node_id === nodeId);
+      }
+
+      if (Number.isFinite(configId) && configId > 0) {
+        list = list.filter((binding) => binding.protocol_config_id === configId);
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({
+        bindings: data,
+        pagination,
+      });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateProtocolBindingRequest;
+      if (!data?.node_id || !data.protocol_config_id || !data.role || !data.kernel_id) {
+        return mockError('Node, protocol config, role, and kernel id are required', 400);
+      }
+
+      const config = mockProtocolConfigs.find((item) => item.id === data.protocol_config_id);
+      const node = mockNodes.find((item) => item.id === data.node_id);
+      const now = Date.now();
+      const newBinding = {
+        id: generateId(),
+        name: data.name,
+        node_id: data.node_id,
+        node_name: node?.name,
+        protocol_config_id: data.protocol_config_id,
+        protocol: config?.protocol,
+        role: data.role,
+        listen: data.listen,
+        connect: data.connect,
+        access_port: data.access_port,
+        status: data.status ?? 'online',
+        kernel_id: data.kernel_id,
+        tags: data.tags ?? [],
+        description: data.description,
+        metadata: data.metadata,
+        sync_status: 'idle',
+        health_status: 'unknown',
+        created_at: now,
+        updated_at: now,
+      };
+
+      mockProtocolBindings.unshift(newBinding);
+      return mockResponse({ binding: newBinding }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/{id}`);
+
+    if (method === 'PATCH') {
+      const data = body as UpdateProtocolBindingRequest;
+      const index = mockProtocolBindings.findIndex((binding) => binding.id === id);
+      if (index === -1) return mockError('Protocol binding not found', 404);
+
+      const config =
+        data.protocol_config_id !== undefined
+          ? mockProtocolConfigs.find((item) => item.id === data.protocol_config_id)
+          : undefined;
+      const node =
+        data.node_id !== undefined ? mockNodes.find((item) => item.id === data.node_id) : undefined;
+
+      mockProtocolBindings[index] = {
+        ...mockProtocolBindings[index],
+        ...data,
+        protocol_config_id: data.protocol_config_id ?? mockProtocolBindings[index].protocol_config_id,
+        node_id: data.node_id ?? mockProtocolBindings[index].node_id,
+        node_name: node?.name ?? mockProtocolBindings[index].node_name,
+        protocol: config?.protocol ?? mockProtocolBindings[index].protocol,
+        tags: data.tags ?? mockProtocolBindings[index].tags ?? [],
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ binding: mockProtocolBindings[index] });
+    }
+
+    if (method === 'DELETE') {
+      const index = mockProtocolBindings.findIndex((binding) => binding.id === id);
+      if (index === -1) return mockError('Protocol binding not found', 404);
+      mockProtocolBindings.splice(index, 1);
+      return mockResponse({}, 204);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/{id}/sync`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/{id}/sync`);
+
+    if (method === 'POST') {
+      const index = mockProtocolBindings.findIndex((binding) => binding.id === id);
+      if (index === -1) return mockError('Protocol binding not found', 404);
+
+      const syncedAt = Math.floor(Date.now() / 1000);
+      mockProtocolBindings[index] = {
+        ...mockProtocolBindings[index],
+        sync_status: 'synced',
+        last_synced_at: syncedAt,
+        last_sync_error: undefined,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({
+        binding_id: id,
+        status: 'success',
+        message: 'Binding synced',
+        synced_at: syncedAt,
+      });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/sync`)) {
+    if (method === 'POST') {
+      const data = body as { binding_ids?: number[]; node_ids?: number[] } | null;
+      const ids = data?.binding_ids ?? [];
+      const nodeIds = data?.node_ids ?? [];
+      const targets = mockProtocolBindings.filter((binding) => {
+        if (ids.length) {
+          return ids.includes(binding.id);
+        }
+        if (nodeIds.length) {
+          return binding.node_id ? nodeIds.includes(binding.node_id) : false;
+        }
+        return true;
+      });
+
+      const syncedAt = Math.floor(Date.now() / 1000);
+      const results = targets.map((binding) => {
+        const index = mockProtocolBindings.findIndex((item) => item.id === binding.id);
+        if (index >= 0) {
+          mockProtocolBindings[index] = {
+            ...mockProtocolBindings[index],
+            sync_status: 'synced',
+            last_synced_at: syncedAt,
+            last_sync_error: undefined,
+            updated_at: Date.now(),
+          };
+        }
+        return {
+          binding_id: binding.id,
+          status: 'success',
+          message: 'Binding synced',
+          synced_at: syncedAt,
+        };
+      });
+
+      return mockResponse({ results });
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes`)) {
     if (method === 'GET') {
       const { data, pagination } = paginate(mockNodes, url);
@@ -1670,6 +2069,92 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         nodes: data,
         pagination,
       });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateNodeRequest;
+
+      if (!data?.name) return mockError('Node name is required', 400);
+      if (!data?.control_endpoint) return mockError('Control endpoint is required', 400);
+
+      const newNode: Node = {
+        id: generateId(),
+        name: data.name,
+        location: data.region ?? data.country ?? '',
+        region: data.region,
+        country: data.country,
+        isp: data.isp,
+        status: 'offline',
+        tags: data.tags ?? [],
+        capacity_mbps: data.capacity_mbps,
+        description: data.description,
+        access_address: data.access_address,
+        control_endpoint: data.control_endpoint,
+        load_percent: 0,
+        online_user_count: 0,
+        traffic_rate_mbps: 0,
+        last_synced_at: undefined,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        kernels: [],
+      };
+
+      mockNodes.unshift(newNode);
+      return mockResponse({ node: newNode }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes/{id}`);
+
+    if (method === 'PATCH') {
+      const data = (body ?? {}) as UpdateNodeRequest;
+      const patch: UpdateNodeRequest = { ...data };
+      delete patch.control_token;
+      delete patch.control_access_key;
+      delete patch.control_secret_key;
+      const nodeIndex = mockNodes.findIndex((node) => node.id === id);
+      if (nodeIndex === -1) return mockError('Node not found', 404);
+
+      if (patch?.name !== undefined && !patch.name) {
+        return mockError('Node name is required', 400);
+      }
+
+      const current = mockNodes[nodeIndex];
+
+      mockNodes[nodeIndex] = {
+        ...current,
+        ...patch,
+        tags: patch.tags ?? current.tags ?? [],
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ node: mockNodes[nodeIndex] });
+    }
+
+    if (method === 'DELETE') {
+      const nodeIndex = mockNodes.findIndex((node) => node.id === id);
+      if (nodeIndex === -1) return mockError('Node not found', 404);
+
+      mockNodes.splice(nodeIndex, 1);
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes/{id}/disable`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes/{id}/disable`);
+
+    if (method === 'POST') {
+      const nodeIndex = mockNodes.findIndex((node) => node.id === id);
+      if (nodeIndex === -1) return mockError('Node not found', 404);
+
+      mockNodes[nodeIndex] = {
+        ...mockNodes[nodeIndex],
+        status: 'disabled',
+        updated_at: Date.now(),
+      };
+
+      return mockResponse({ node: mockNodes[nodeIndex] });
     }
   }
 
@@ -1693,25 +2178,70 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     if (method === 'POST') {
       const nodeIndex = mockNodes.findIndex((n) => n.id === id);
       if (nodeIndex === -1) return mockError('Node not found', 404);
-      
-      // Update last_synced_at for all kernels
-      const updatedKernels = (mockNodes[nodeIndex].kernels || []).map((kernel) => ({
-        ...kernel,
-        last_synced_at: Math.floor(Date.now() / 1000),
-        status: 'online', // Mark as online after sync
-      }));
-      
+
+      const payload = body as { protocol?: string } | null;
+      const protocol = payload?.protocol?.trim();
+      const now = Math.floor(Date.now() / 1000);
+      const currentKernels = mockNodes[nodeIndex].kernels || [];
+      let updatedKernels = currentKernels;
+
+      if (protocol) {
+        const hasProtocol = currentKernels.some((kernel) => kernel.protocol === protocol);
+        if (!hasProtocol) {
+          updatedKernels = [
+            ...currentKernels,
+            {
+              protocol,
+              revision: 'v1.0.0',
+              status: 'online',
+              last_synced_at: now,
+            },
+          ];
+        }
+
+        updatedKernels = updatedKernels.map((kernel) =>
+          kernel.protocol === protocol
+            ? {
+                ...kernel,
+                last_synced_at: now,
+                status: 'online',
+              }
+            : kernel,
+        );
+      } else {
+        updatedKernels = currentKernels.map((kernel) => ({
+          ...kernel,
+          last_synced_at: now,
+          status: 'online',
+        }));
+      }
+
+      const protocols = Array.from(
+        new Set([...(mockNodes[nodeIndex].protocols || []), ...updatedKernels.map((k) => k.protocol)]),
+      );
+
       mockNodes[nodeIndex] = {
         ...mockNodes[nodeIndex],
         kernels: updatedKernels,
-        last_synced_at: Math.floor(Date.now() / 1000),
-        updated_at: Math.floor(Date.now() / 1000),
+        protocols,
+        last_synced_at: now,
+        updated_at: now,
       };
-      
+
+      const syncedCount = protocol
+        ? updatedKernels.filter((kernel) => kernel.protocol === protocol).length
+        : updatedKernels.length;
+
+      const targetKernel = protocol
+        ? updatedKernels.find((kernel) => kernel.protocol === protocol)
+        : updatedKernels[0];
+
       return mockResponse({
         node_id: id,
-        synced_count: updatedKernels.length,
-        kernels: updatedKernels,
+        protocol: protocol || '',
+        revision: targetKernel?.revision || '',
+        synced_at: now,
+        message: protocol ? 'ok' : `synced ${syncedCount} kernels`,
       });
     }
   }

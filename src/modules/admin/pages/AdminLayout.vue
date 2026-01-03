@@ -48,6 +48,17 @@ function handleLogout() {
           节点
         </Button>
       </RouterLink>
+      <RouterLink to="/admin/protocols" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          协议
+        </Button>
+      </RouterLink>
       <RouterLink to="/admin/users" custom v-slot="{ href, navigate, isActive }">
         <Button
           :as="'a'"

@@ -577,7 +577,9 @@ async function refreshPaymentStatus(silent = false) {
   }
 
   try {
-    const response = await userApi.fetchUserOrderPaymentStatus(selectedOrderId.value);
+    const response = await userApi.fetchUserOrderPaymentStatus(selectedOrderId.value, {
+      toastOnError: !silent,
+    });
     if (detail.value) {
       detail.value.order = {
         ...detail.value.order,
