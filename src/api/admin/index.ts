@@ -12,7 +12,6 @@ import type {
   CancelOrderRequest,
   CreateNodeRequest,
   CreateProtocolBindingRequest,
-  CreateProtocolConfigRequest,
   CreateAdminSubscriptionRequest,
   CreateAdminUserRequest,
   CreateAnnouncementRequest,
@@ -33,7 +32,6 @@ import type {
   ProtocolBindingSummary,
   ProtocolBindingSyncResponse,
   ProtocolBindingSyncResult,
-  ProtocolConfigSummary,
   PublishAnnouncementRequest,
   PublishTemplateRequest,
   PublishTemplateResponse,
@@ -50,12 +48,28 @@ import type {
   UpdatePaymentChannelRequest,
   UpdatePlanRequest,
   UpdateProtocolBindingRequest,
-  UpdateProtocolConfigRequest,
   UpdateSecuritySettingsRequest,
   UpdateTemplateRequest,
   UpdateUserRolesRequest,
   UpdateUserStatusRequest,
   UpdateNodeRequest,
+  AuditLogExportResponse,
+  AuditLogResponse,
+  CouponSummary,
+  CreateCouponRequest,
+  CreatePlanBillingOptionRequest,
+  CreateProtocolEntryRequest,
+  NodeStatusSyncResponse,
+  PlanBillingOptionSummary,
+  ProtocolBindingStatusSyncResponse,
+  ProtocolEntrySummary,
+  ReconcileOrderPaymentRequest,
+  RotateUserCredentialResponse,
+  SiteSettingResponse,
+  UpdateCouponRequest,
+  UpdatePlanBillingOptionRequest,
+  UpdateProtocolEntryRequest,
+  UpdateSiteSettingRequest,
 } from '../types';
 
 type PaginationQuery = {
@@ -78,21 +92,26 @@ type AdminProtocolBindingsQuery = PaginationQuery & {
   status?: string;
   protocol?: string;
   node_id?: number;
-  protocol_config_id?: number;
 };
 
-type AdminProtocolConfigsQuery = PaginationQuery & {
+type AdminProtocolEntriesQuery = PaginationQuery & {
   sort?: string;
   direction?: string;
   q?: string;
   protocol?: string;
   status?: string;
+  binding_id?: number;
 };
 
 type AdminPlansQuery = PaginationQuery & {
   sort?: string;
   direction?: string;
   q?: string;
+  status?: string;
+  visible?: boolean;
+};
+
+type AdminPlanBillingOptionsQuery = {
   status?: string;
   visible?: boolean;
 };
@@ -124,6 +143,13 @@ type AdminAnnouncementsQuery = PaginationQuery & {
   direction?: string;
 };
 
+type AdminCouponsQuery = PaginationQuery & {
+  q?: string;
+  status?: string;
+  sort?: string;
+  direction?: string;
+};
+
 type AdminUsersQuery = PaginationQuery & {
   q?: string;
   status?: string;
@@ -148,6 +174,19 @@ type AdminSubscriptionsQuery = PaginationQuery & {
   plan_name?: string;
   plan_id?: number;
   template_id?: number;
+};
+
+type AdminAuditLogsQuery = PaginationQuery & {
+  actor_id?: number;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  since?: number;
+  until?: number;
+};
+
+type AdminAuditLogsExportQuery = AdminAuditLogsQuery & {
+  format?: string;
 };
 
 type PaginatedResponse<T> = {
@@ -198,6 +237,12 @@ export function forceAdminUserLogout(id: number) {
   });
 }
 
+export function rotateAdminUserCredential(id: number) {
+  return requestJson<RotateUserCredentialResponse>(adminPath(`/users/${id}/credentials/rotate`), {
+    method: 'POST',
+  });
+}
+
 export function fetchAdminSubscriptions(query: AdminSubscriptionsQuery = {}) {
   return requestJson<PaginatedResponse<{ subscriptions: AdminSubscriptionSummary[] }>>(
     withQuery(adminPath('/subscriptions'), query),
@@ -242,28 +287,28 @@ export function fetchAdminNodes(query: AdminNodesQuery = {}) {
   );
 }
 
-export function fetchAdminProtocolConfigs(query: AdminProtocolConfigsQuery = {}) {
-  return requestJson<PaginatedResponse<{ configs: ProtocolConfigSummary[] }>>(
-    withQuery(adminPath('/protocol-configs'), query),
+export function fetchAdminProtocolEntries(query: AdminProtocolEntriesQuery = {}) {
+  return requestJson<PaginatedResponse<{ entries: ProtocolEntrySummary[] }>>(
+    withQuery(adminPath('/protocol-entries'), query),
   );
 }
 
-export function createAdminProtocolConfig(payload: CreateProtocolConfigRequest) {
-  return requestJson<{ config: ProtocolConfigSummary }>(adminPath('/protocol-configs'), {
+export function createAdminProtocolEntry(payload: CreateProtocolEntryRequest) {
+  return requestJson<ProtocolEntrySummary>(adminPath('/protocol-entries'), {
     method: 'POST',
     json: payload,
   });
 }
 
-export function updateAdminProtocolConfig(id: number, payload: UpdateProtocolConfigRequest) {
-  return requestJson<{ config: ProtocolConfigSummary }>(adminPath(`/protocol-configs/${id}`), {
+export function updateAdminProtocolEntry(id: number, payload: UpdateProtocolEntryRequest) {
+  return requestJson<ProtocolEntrySummary>(adminPath(`/protocol-entries/${id}`), {
     method: 'PATCH',
     json: payload,
   });
 }
 
-export function deleteAdminProtocolConfig(id: number) {
-  return requestJson<void>(adminPath(`/protocol-configs/${id}`), {
+export function deleteAdminProtocolEntry(id: number) {
+  return requestJson<void>(adminPath(`/protocol-entries/${id}`), {
     method: 'DELETE',
   });
 }
@@ -302,6 +347,13 @@ export function syncAdminProtocolBinding(id: number) {
 
 export function syncAdminProtocolBindings(payload: { binding_ids?: number[]; node_ids?: number[] }) {
   return requestJson<ProtocolBindingSyncResponse>(adminPath('/protocol-bindings/sync'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function syncAdminProtocolBindingsStatus(payload: { node_ids: number[] }) {
+  return requestJson<ProtocolBindingStatusSyncResponse>(adminPath('/protocol-bindings/status/sync'), {
     method: 'POST',
     json: payload,
   });
@@ -346,6 +398,13 @@ export function syncNodeKernels(id: number, payload?: { protocol?: string }) {
   });
 }
 
+export function syncAdminNodeStatus(payload: { node_ids: number[] }) {
+  return requestJson<NodeStatusSyncResponse>(adminPath('/nodes/status/sync'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
 export function fetchAdminPlans(query: AdminPlansQuery = {}) {
   return requestJson<PaginatedResponse<{ plans: PlanSummary[] }>>(
     withQuery(adminPath('/plans'), query),
@@ -364,6 +423,42 @@ export function updateAdminPlan(id: number, payload: UpdatePlanRequest) {
     method: 'PATCH',
     json: payload,
   });
+}
+
+export function fetchAdminPlanBillingOptions(
+  planId: number,
+  query: AdminPlanBillingOptionsQuery = {},
+) {
+  return requestJson<{ options: PlanBillingOptionSummary[] }>(
+    withQuery(adminPath(`/plans/${planId}/billing-options`), query),
+  );
+}
+
+export function createAdminPlanBillingOption(
+  planId: number,
+  payload: CreatePlanBillingOptionRequest,
+) {
+  return requestJson<PlanBillingOptionSummary>(
+    adminPath(`/plans/${planId}/billing-options`),
+    {
+      method: 'POST',
+      json: payload,
+    },
+  );
+}
+
+export function updateAdminPlanBillingOption(
+  planId: number,
+  id: number,
+  payload: UpdatePlanBillingOptionRequest,
+) {
+  return requestJson<PlanBillingOptionSummary>(
+    adminPath(`/plans/${planId}/billing-options/${id}`),
+    {
+      method: 'PATCH',
+      json: payload,
+    },
+  );
 }
 
 export function fetchAdminPaymentChannels(query: AdminPaymentChannelsQuery = {}) {
@@ -387,6 +482,32 @@ export function updateAdminPaymentChannel(id: number, payload: UpdatePaymentChan
   return requestJson<PaymentChannelResponse>(adminPath(`/payment-channels/${id}`), {
     method: 'PATCH',
     json: payload,
+  });
+}
+
+export function fetchAdminCoupons(query: AdminCouponsQuery = {}) {
+  return requestJson<PaginatedResponse<{ coupons: CouponSummary[] }>>(
+    withQuery(adminPath('/coupons'), query),
+  );
+}
+
+export function createAdminCoupon(payload: CreateCouponRequest) {
+  return requestJson<CouponSummary>(adminPath('/coupons'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function updateAdminCoupon(id: number, payload: UpdateCouponRequest) {
+  return requestJson<CouponSummary>(adminPath(`/coupons/${id}`), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function deleteAdminCoupon(id: number) {
+  return requestJson<MessageResponse>(adminPath(`/coupons/${id}`), {
+    method: 'DELETE',
   });
 }
 
@@ -477,6 +598,32 @@ export function refundAdminOrder(id: number, payload: RefundOrderRequest) {
     method: 'POST',
     json: payload,
   });
+}
+
+export function reconcileAdminOrderPayments(payload: ReconcileOrderPaymentRequest) {
+  return requestJson<AdminOrderDetailResponse>(adminPath('/orders/payments/reconcile'), {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export function fetchAdminSiteSettings() {
+  return requestJson<SiteSettingResponse>(adminPath('/site-settings'));
+}
+
+export function updateAdminSiteSettings(payload: UpdateSiteSettingRequest) {
+  return requestJson<SiteSettingResponse>(adminPath('/site-settings'), {
+    method: 'PATCH',
+    json: payload,
+  });
+}
+
+export function fetchAdminAuditLogs(query: AdminAuditLogsQuery = {}) {
+  return requestJson<AuditLogResponse>(withQuery(adminPath('/audit-logs'), query));
+}
+
+export function exportAdminAuditLogs(query: AdminAuditLogsExportQuery = {}) {
+  return requestJson<AuditLogExportResponse>(withQuery(adminPath('/audit-logs/export'), query));
 }
 
 export function fetchAdminSecuritySettings() {

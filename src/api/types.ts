@@ -6,6 +6,15 @@ export type PaginationMeta = {
   has_prev: boolean;
 };
 
+export type PingResponse = {
+  status: string;
+  service: string;
+  version: string;
+  site_name: string;
+  logo_url: string;
+  timestamp: number;
+};
+
 export type AuthenticatedUser = {
   id: number;
   email: string;
@@ -113,6 +122,20 @@ export type MessageResponse = {
   message: string;
 };
 
+export type CredentialSummary = {
+  version: number;
+  status: string;
+  issued_at: number;
+  deprecated_at?: number;
+  revoked_at?: number;
+  last_seen_at?: number;
+};
+
+export type RotateUserCredentialResponse = {
+  user_id?: number;
+  credential: CredentialSummary;
+};
+
 export type AdminSubscriptionUserSummary = {
   id: number;
   email: string;
@@ -196,6 +219,7 @@ export type NodeSummary = {
   description?: string;
   access_address?: string;
   control_endpoint?: string;
+  status_sync_enabled?: boolean;
   last_synced_at?: number;
   updated_at?: number;
 };
@@ -228,6 +252,7 @@ export type CreateNodeRequest = {
   region?: string;
   country?: string;
   isp?: string;
+  status?: string;
   tags?: string[];
   capacity_mbps?: number;
   description?: string;
@@ -236,6 +261,7 @@ export type CreateNodeRequest = {
   control_token?: string;
   control_access_key?: string;
   control_secret_key?: string;
+  status_sync_enabled?: boolean;
 };
 
 export type UpdateNodeRequest = {
@@ -243,6 +269,7 @@ export type UpdateNodeRequest = {
   region?: string;
   country?: string;
   isp?: string;
+  status?: string;
   tags?: string[];
   capacity_mbps?: number;
   description?: string;
@@ -251,6 +278,7 @@ export type UpdateNodeRequest = {
   control_token?: string;
   control_access_key?: string;
   control_secret_key?: string;
+  status_sync_enabled?: boolean;
 };
 
 export type SyncNodeKernelsResponse = {
@@ -263,34 +291,15 @@ export type SyncNodeKernelsResponse = {
   kernels?: NodeKernelSummary[];
 };
 
-export type ProtocolConfigSummary = {
-  id: number;
-  name: string;
-  protocol: string;
-  status?: string;
-  tags?: string[];
-  description?: string;
-  profile?: Record<string, unknown>;
-  created_at?: number;
-  updated_at?: number;
+export type NodeStatusSyncResult = {
+  node_id: number;
+  status: string;
+  message?: string;
+  synced_at?: number;
 };
 
-export type CreateProtocolConfigRequest = {
-  name: string;
-  protocol: string;
-  status?: string;
-  tags?: string[];
-  description?: string;
-  profile?: Record<string, unknown>;
-};
-
-export type UpdateProtocolConfigRequest = {
-  name?: string;
-  protocol?: string;
-  status?: string;
-  tags?: string[];
-  description?: string;
-  profile?: Record<string, unknown>;
+export type NodeStatusSyncResponse = {
+  results: NodeStatusSyncResult[];
 };
 
 export type ProtocolBindingSummary = {
@@ -298,7 +307,6 @@ export type ProtocolBindingSummary = {
   name?: string;
   node_id?: number;
   node_name?: string;
-  protocol_config_id?: number;
   protocol?: string;
   role?: string;
   listen?: string;
@@ -313,6 +321,7 @@ export type ProtocolBindingSummary = {
   last_sync_error?: string;
   tags?: string[];
   description?: string;
+  profile?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   created_at?: number;
   updated_at?: number;
@@ -321,8 +330,9 @@ export type ProtocolBindingSummary = {
 export type CreateProtocolBindingRequest = {
   name?: string;
   node_id: number;
-  protocol_config_id: number;
+  protocol: string;
   role: string;
+  profile: Record<string, unknown>;
   listen?: string;
   connect?: string;
   access_port?: number;
@@ -336,8 +346,9 @@ export type CreateProtocolBindingRequest = {
 export type UpdateProtocolBindingRequest = {
   name?: string;
   node_id?: number;
-  protocol_config_id?: number;
+  protocol?: string;
   role?: string;
+  profile?: Record<string, unknown>;
   listen?: string;
   connect?: string;
   access_port?: number;
@@ -359,6 +370,62 @@ export type ProtocolBindingSyncResponse = {
   results: ProtocolBindingSyncResult[];
 };
 
+export type ProtocolBindingStatusSyncResult = {
+  node_id: number;
+  status: string;
+  message?: string;
+  synced_at?: number;
+  updated?: number;
+};
+
+export type ProtocolBindingStatusSyncResponse = {
+  results: ProtocolBindingStatusSyncResult[];
+};
+
+export type ProtocolEntrySummary = {
+  id: number;
+  name?: string;
+  binding_id: number;
+  binding_name?: string;
+  node_id?: number;
+  node_name?: string;
+  protocol?: string;
+  status?: string;
+  binding_status?: string;
+  health_status?: string;
+  entry_address: string;
+  entry_port: number;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type CreateProtocolEntryRequest = {
+  name?: string;
+  binding_id: number;
+  entry_address: string;
+  entry_port: number;
+  protocol?: string;
+  status?: string;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+};
+
+export type UpdateProtocolEntryRequest = {
+  name?: string;
+  binding_id?: number;
+  entry_address?: string;
+  entry_port?: number;
+  protocol?: string;
+  status?: string;
+  tags?: string[];
+  description?: string;
+  profile?: Record<string, unknown>;
+};
+
 export type PlanSummary = {
   id: number;
   name: string;
@@ -367,6 +434,7 @@ export type PlanSummary = {
   tags?: string[];
   features?: string[];
   binding_ids?: number[];
+  billing_options?: PlanBillingOptionSummary[];
   price_cents: number;
   currency: string;
   duration_days: number;
@@ -378,6 +446,43 @@ export type PlanSummary = {
   visible?: boolean;
   created_at?: number;
   updated_at?: number;
+};
+
+export type PlanBillingOptionSummary = {
+  id: number;
+  plan_id: number;
+  name?: string;
+  duration_value: number;
+  duration_unit: string;
+  price_cents: number;
+  currency: string;
+  sort_order?: number;
+  status?: string;
+  visible?: boolean;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type CreatePlanBillingOptionRequest = {
+  name?: string;
+  duration_value: number;
+  duration_unit: string;
+  price_cents: number;
+  currency?: string;
+  sort_order?: number;
+  status?: string;
+  visible?: boolean;
+};
+
+export type UpdatePlanBillingOptionRequest = {
+  name?: string;
+  duration_value?: number;
+  duration_unit?: string;
+  price_cents?: number;
+  currency?: string;
+  sort_order?: number;
+  status?: string;
+  visible?: boolean;
 };
 
 export type CreatePlanRequest = {
@@ -419,6 +524,54 @@ export type UpdatePlanRequest = {
 export type Plan = PlanSummary & {
   device_limit?: number;
   is_visible?: boolean;
+};
+
+export type CouponSummary = {
+  id: number;
+  code: string;
+  name: string;
+  description?: string;
+  status?: string;
+  discount_type: string;
+  discount_value: number;
+  currency?: string;
+  max_redemptions?: number;
+  max_redemptions_per_user?: number;
+  min_order_cents?: number;
+  starts_at?: number;
+  ends_at?: number;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type CreateCouponRequest = {
+  code: string;
+  name: string;
+  description?: string;
+  status?: string;
+  discount_type: string;
+  discount_value: number;
+  currency?: string;
+  max_redemptions?: number;
+  max_redemptions_per_user?: number;
+  min_order_cents?: number;
+  starts_at?: number;
+  ends_at?: number;
+};
+
+export type UpdateCouponRequest = {
+  code?: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  discount_type?: string;
+  discount_value?: number;
+  currency?: string;
+  max_redemptions?: number;
+  max_redemptions_per_user?: number;
+  min_order_cents?: number;
+  starts_at?: number;
+  ends_at?: number;
 };
 
 export type PaymentChannelSummary = {
@@ -496,6 +649,23 @@ export type UpdateAnnouncementRequest = {
 export type PublishAnnouncementRequest = {
   visible_to?: number;
   operator?: string;
+};
+
+export type SiteSetting = {
+  id: number;
+  name: string;
+  logo_url?: string;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type SiteSettingResponse = {
+  setting: SiteSetting;
+};
+
+export type UpdateSiteSettingRequest = {
+  name?: string;
+  logo_url?: string;
 };
 
 export type TemplateVariable = {
@@ -659,6 +829,9 @@ export type RefundOrderRequest = {
   amount_cents: number;
   reason?: string;
   operator?: string;
+  metadata?: Record<string, unknown>;
+  refund_at?: number;
+  credit_balance?: boolean;
 };
 
 export type RefundOrderResponse = {
@@ -689,10 +862,40 @@ export type SecuritySettingsResponse = {
   setting: SecuritySetting;
 };
 
+export type AuditLogSummary = {
+  id: number;
+  actor_id?: number;
+  actor_email?: string;
+  actor_roles?: string[];
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  source_ip?: string;
+  metadata?: Record<string, unknown>;
+  created_at: number;
+};
+
+export type AuditLogResponse = {
+  logs: AuditLogSummary[];
+  pagination: PaginationMeta;
+};
+
+export type AuditLogExportResponse = {
+  logs: AuditLogSummary[];
+  total_count: number;
+  exported_at: number;
+};
+
+export type ReconcileOrderPaymentRequest = {
+  order_id: number;
+  payment_id: number;
+};
+
 export type UserSubscriptionSummary = {
   id: number;
   name: string;
   plan_name?: string;
+  plan_id?: number;
   status?: string;
   template_id?: number;
   available_template_ids?: number[];
@@ -711,12 +914,82 @@ export type UserPlanSummary = {
   name: string;
   description?: string;
   features?: string[];
+  billing_options?: PlanBillingOptionSummary[];
   price_cents: number;
   currency: string;
   duration_days: number;
   traffic_limit_bytes?: number;
   devices_limit?: number;
   tags?: string[];
+};
+
+export type UserNodeKernelStatusSummary = {
+  protocol: string;
+  status: string;
+  last_synced_at?: number;
+};
+
+export type UserNodeProtocolStatusSummary = {
+  binding_id: number;
+  protocol: string;
+  role: string;
+  status: string;
+  health_status?: string;
+  last_heartbeat_at?: number;
+};
+
+export type UserNodeStatusSummary = {
+  id: number;
+  name: string;
+  region?: string;
+  country?: string;
+  isp?: string;
+  status?: string;
+  tags?: string[];
+  capacity_mbps?: number;
+  description?: string;
+  last_synced_at?: number;
+  updated_at?: number;
+  kernel_statuses?: UserNodeKernelStatusSummary[];
+  protocol_statuses?: UserNodeProtocolStatusSummary[];
+};
+
+export type UserNodesResponse = {
+  nodes: UserNodeStatusSummary[];
+  pagination: PaginationMeta;
+};
+
+export type UserProfile = {
+  id: number;
+  email: string;
+  display_name: string;
+  status: string;
+  email_verified_at?: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type UserProfileResponse = {
+  profile: UserProfile;
+};
+
+export type UpdateUserProfileRequest = {
+  display_name: string;
+};
+
+export type UpdateUserPasswordRequest = {
+  current_password: string;
+  new_password: string;
+};
+
+export type RequestUserEmailCodeRequest = {
+  email: string;
+};
+
+export type UpdateUserEmailRequest = {
+  email: string;
+  code: string;
+  password: string;
 };
 
 export type UserAnnouncementSummary = {
@@ -801,6 +1074,7 @@ export type UserSubscriptionTrafficResponse = {
 
 export type CreateUserOrderRequest = {
   plan_id: number;
+  billing_option_id?: number;
   quantity: number;
   payment_method?: string;
   payment_channel?: string;

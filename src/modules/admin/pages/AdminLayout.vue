@@ -103,6 +103,17 @@ function handleLogout() {
           套餐
         </Button>
       </RouterLink>
+      <RouterLink to="/admin/coupons" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          优惠券
+        </Button>
+      </RouterLink>
       <RouterLink to="/admin/announcements" custom v-slot="{ href, navigate, isActive }">
         <Button
           :as="'a'"
@@ -125,6 +136,17 @@ function handleLogout() {
           支付配置
         </Button>
       </RouterLink>
+      <RouterLink to="/admin/site-settings" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          站点设置
+        </Button>
+      </RouterLink>
       <RouterLink to="/admin/security" custom v-slot="{ href, navigate, isActive }">
         <Button
           :as="'a'"
@@ -134,6 +156,17 @@ function handleLogout() {
           @click="navigate"
         >
           安全设置
+        </Button>
+      </RouterLink>
+      <RouterLink to="/admin/audit-logs" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          审计日志
         </Button>
       </RouterLink>
       <RouterLink to="/admin/orders" custom v-slot="{ href, navigate, isActive }">

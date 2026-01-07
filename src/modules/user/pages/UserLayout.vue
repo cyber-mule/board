@@ -59,6 +59,17 @@ function handleLogout() {
           套餐
         </Button>
       </RouterLink>
+      <RouterLink to="/user/nodes" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          节点
+        </Button>
+      </RouterLink>
       <RouterLink to="/user/orders" custom v-slot="{ href, navigate, isActive }">
         <Button
           :as="'a'"
@@ -90,6 +101,17 @@ function handleLogout() {
           @click="navigate"
         >
           公告
+        </Button>
+      </RouterLink>
+      <RouterLink to="/user/account" custom v-slot="{ href, navigate, isActive }">
+        <Button
+          :as="'a'"
+          :href="href"
+          size="sm"
+          :variant="isActive ? 'default' : 'secondary'"
+          @click="navigate"
+        >
+          账户
         </Button>
       </RouterLink>
     </nav>

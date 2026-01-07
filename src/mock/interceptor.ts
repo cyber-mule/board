@@ -8,14 +8,18 @@ import { API_PREFIX, ADMIN_PREFIX } from '../config/env';
 import {
   mockUsers,
   mockPlans,
+  mockPlanBillingOptions,
   mockSubscriptions,
   mockOrders,
   mockAnnouncements,
+  mockCoupons,
   mockNodes,
-  mockProtocolConfigs,
   mockProtocolBindings,
+  mockProtocolEntries,
   mockTemplates,
   mockPaymentChannels,
+  mockSiteSettings,
+  mockAuditLogs,
   mockSecuritySettings,
   currentUser,
   setCurrentUser,
@@ -32,7 +36,13 @@ import type {
   ForgotPasswordRequest,
   ResetPasswordRequest,
   MessageResponse,
+  AuditLogSummary,
+  CouponSummary,
+  CreateCouponRequest,
+  CreatePlanBillingOptionRequest,
   Plan,
+  User,
+  PlanBillingOptionSummary,
   UserSubscription,
   Announcement,
   Order,
@@ -48,13 +58,15 @@ import type {
   UpdatePlanRequest,
   CreateAnnouncementRequest,
   CreateNodeRequest,
+  CreateProtocolEntryRequest,
   CreateProtocolBindingRequest,
-  CreateProtocolConfigRequest,
   UpdateAnnouncementRequest,
   UpdateNodeRequest,
+  UpdateProtocolEntryRequest,
   UpdateProtocolBindingRequest,
-  UpdateProtocolConfigRequest,
   PublishAnnouncementRequest,
+  UpdatePlanBillingOptionRequest,
+  UpdateCouponRequest,
   CreateTemplateRequest,
   UpdateTemplateRequest,
   PublishTemplateRequest,
@@ -164,6 +176,7 @@ function normalizePlan(plan: Plan) {
     ...planValue,
     devices_limit: planValue.devices_limit ?? planValue.device_limit,
     visible: planValue.visible ?? planValue.is_visible,
+    billing_options: mockPlanBillingOptions.filter((option) => option.plan_id === planValue.id),
   };
 }
 
@@ -177,6 +190,18 @@ function normalizeTemplate(template: SubscriptionTemplateSummary): SubscriptionT
   return {
     ...template,
     version: Number.isFinite(parsedVersion) ? parsedVersion : 1,
+  };
+}
+
+let credentialVersion = 1;
+
+function buildCredentialSummary() {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  return {
+    version: credentialVersion++,
+    status: 'active',
+    issued_at: issuedAt,
+    last_seen_at: issuedAt,
   };
 }
 
@@ -210,6 +235,52 @@ function normalizeAdminUser(user: AdminUserSource): AdminUserSummary {
     last_login_at: user.last_login_at,
     created_at: user.created_at,
     updated_at: user.updated_at,
+  };
+}
+
+function buildUserProfile(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    display_name: user.display_name,
+    status: user.status ?? 'active',
+    email_verified_at: user.email_verified_at,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
+}
+
+function buildUserNodeStatus(node: Node) {
+  const kernelStatuses = (node.kernels ?? []).map((kernel) => ({
+    protocol: kernel.protocol,
+    status: kernel.status ?? 'unknown',
+    last_synced_at: kernel.last_synced_at,
+  }));
+  const protocolStatuses = mockProtocolBindings
+    .filter((binding) => binding.node_id === node.id)
+    .map((binding) => ({
+      binding_id: binding.id,
+      protocol: binding.protocol ?? '',
+      role: binding.role ?? '',
+      status: binding.status ?? 'unknown',
+      health_status: binding.health_status,
+      last_heartbeat_at: binding.last_heartbeat_at,
+    }));
+
+  return {
+    id: node.id,
+    name: node.name,
+    region: node.region,
+    country: node.country,
+    isp: node.isp,
+    status: node.status,
+    tags: node.tags,
+    capacity_mbps: node.capacity_mbps,
+    description: node.description,
+    last_synced_at: node.last_synced_at,
+    updated_at: node.updated_at,
+    kernel_statuses: kernelStatuses,
+    protocol_statuses: protocolStatuses,
   };
 }
 
@@ -584,9 +655,76 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
   }
 
   // User endpoints
-  if (matchPath(url, `${API_PREFIX}/user/profile`)) {
-    if (method === 'GET' && currentUser) {
-      return mockResponse({ user: currentUser });
+  if (
+    matchPath(url, `${API_PREFIX}/user/account/profile`) ||
+    matchPath(url, `${API_PREFIX}/user/profile`)
+  ) {
+    if (!currentUser) return mockError('Unauthorized', 401);
+
+    if (method === 'GET') {
+      return mockResponse({ profile: buildUserProfile(currentUser) });
+    }
+
+    if (method === 'PATCH') {
+      const payload = body as { display_name?: string };
+      currentUser.display_name = payload?.display_name ?? currentUser.display_name;
+      currentUser.updated_at = Date.now();
+      return mockResponse({ profile: buildUserProfile(currentUser) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/account/password`)) {
+    if (method === 'POST' && currentUser) {
+      return mockResponse({ message: 'Password updated' });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/account/credentials/rotate`)) {
+    if (method === 'POST' && currentUser) {
+      return mockResponse({ credential: buildCredentialSummary() });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/account/email/code`)) {
+    if (method === 'POST' && currentUser) {
+      return mockResponse({ message: 'Verification code sent' });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/account/email`)) {
+    if (method === 'POST' && currentUser) {
+      const payload = body as { email?: string };
+      if (payload?.email) {
+        currentUser.email = payload.email;
+        currentUser.updated_at = Date.now();
+      }
+      return mockResponse({ profile: buildUserProfile(currentUser) });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/user/nodes`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const status = query?.get('status')?.trim();
+      const protocol = query?.get('protocol')?.trim();
+
+      let list = mockNodes.map(buildUserNodeStatus);
+
+      if (status) {
+        list = list.filter((node) => node.status === status);
+      }
+      if (protocol) {
+        list = list.filter((node) =>
+          (node.protocol_statuses ?? []).some((item) => item.protocol === protocol),
+        );
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({
+        nodes: data,
+        pagination,
+      });
     }
   }
 
@@ -917,6 +1055,19 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
   }
 
   // Public endpoints
+  if (matchPath(url, `${API_PREFIX}/ping`)) {
+    if (method === 'GET') {
+      return mockResponse({
+        status: 'ok',
+        service: 'znp',
+        version: 'mock',
+        site_name: mockSiteSettings.name,
+        logo_url: mockSiteSettings.logo_url,
+        timestamp: Math.floor(Date.now() / 1000),
+      });
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/plans`)) {
     if (method === 'GET') {
       const visiblePlans = mockPlans
@@ -971,7 +1122,7 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
           {
             key: 'protocols',
             name: 'Protocols',
-            description: 'Manage protocol configs and bindings.',
+            description: 'Manage protocol bindings and entries.',
             route: '/admin/protocols',
           },
           {
@@ -979,6 +1130,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             name: 'Plans',
             description: 'Manage pricing plans and availability.',
             route: '/admin/plans',
+          },
+          {
+            key: 'coupons',
+            name: 'Coupons',
+            description: 'Manage promotional coupons and discounts.',
+            route: '/admin/coupons',
           },
           {
             key: 'orders',
@@ -999,6 +1156,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             route: '/admin/payment-channels',
           },
           {
+            key: 'site_settings',
+            name: 'Site Settings',
+            description: 'Manage site branding and metadata.',
+            route: '/admin/site-settings',
+          },
+          {
             key: 'templates',
             name: 'Subscription Templates',
             description: 'Manage subscription template configurations.',
@@ -1015,6 +1178,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
             name: 'Security',
             description: 'Configure third-party API settings.',
             route: '/admin/security',
+          },
+          {
+            key: 'audit_logs',
+            name: 'Audit Logs',
+            description: 'Review audit trails for admin operations.',
+            route: '/admin/audit-logs',
           },
         ],
       });
@@ -1138,6 +1307,16 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       if (!user) return mockError('User not found', 404);
 
       return mockResponse({ message: 'User logged out' });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/credentials/rotate`)) {
+    if (method === 'POST') {
+      const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/users/{id}/credentials/rotate`);
+      const user = mockUsers.find((item) => item.id === id);
+      if (!user) return mockError('User not found', 404);
+
+      return mockResponse({ user_id: id, credential: buildCredentialSummary() });
     }
   }
 
@@ -1355,6 +1534,73 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/plans/{id}/billing-options`)) {
+    const planId = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/plans/{id}/billing-options`);
+
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const status = parsedUrl?.searchParams.get('status')?.trim();
+      const visibleParam = parsedUrl?.searchParams.get('visible')?.trim();
+      const visible =
+        visibleParam === undefined || visibleParam === '' ? undefined : visibleParam === 'true';
+
+      let list = mockPlanBillingOptions.filter((option) => option.plan_id === planId);
+
+      if (status) {
+        list = list.filter((option) => (option.status || '').toLowerCase() === status.toLowerCase());
+      }
+      if (visible !== undefined) {
+        list = list.filter((option) => option.visible === visible);
+      }
+
+      return mockResponse({ options: list });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreatePlanBillingOptionRequest;
+      if (!data?.duration_value || !data?.duration_unit || !data?.price_cents) {
+        return mockError('Duration and price are required', 400);
+      }
+
+      const newOption: PlanBillingOptionSummary = {
+        id: generateId(),
+        plan_id: planId,
+        name: data.name,
+        duration_value: data.duration_value,
+        duration_unit: data.duration_unit,
+        price_cents: data.price_cents,
+        currency: data.currency ?? 'USD',
+        sort_order: data.sort_order ?? 0,
+        status: data.status ?? 'active',
+        visible: data.visible ?? true,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+      };
+
+      mockPlanBillingOptions.push(newOption);
+      return mockResponse(newOption, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/plans/{id}/billing-options/{option_id}`)) {
+    const urlPath = getUrlPath(url);
+    const optionId = Number(urlPath.split('/').pop() ?? '');
+
+    if (method === 'PATCH') {
+      const data = body as UpdatePlanBillingOptionRequest;
+      const index = mockPlanBillingOptions.findIndex((option) => option.id === optionId);
+      if (index === -1) return mockError('Billing option not found', 404);
+
+      mockPlanBillingOptions[index] = {
+        ...mockPlanBillingOptions[index],
+        ...data,
+        updated_at: Date.now(),
+      };
+
+      return mockResponse(mockPlanBillingOptions[index]);
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/payment-channels`)) {
     if (method === 'GET') {
       const parsedUrl = parseUrl(url);
@@ -1449,6 +1695,104 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       };
 
       return mockResponse({ channel: mockPaymentChannels[channelIndex] });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/coupons`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const q = query?.get('q')?.trim().toLowerCase();
+      const status = query?.get('status')?.trim().toLowerCase();
+      const sort = query?.get('sort')?.trim() || 'created_at';
+      const direction = query?.get('direction')?.trim() || 'desc';
+
+      let list = [...mockCoupons];
+
+      if (q) {
+        list = list.filter((coupon) => {
+          const haystack = [coupon.code, coupon.name, coupon.description]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(q);
+        });
+      }
+
+      if (status) {
+        list = list.filter((coupon) => (coupon.status || '').toLowerCase() === status);
+      }
+
+      list.sort((a, b) => {
+        const multiplier = direction === 'asc' ? 1 : -1;
+        if (sort === 'code') {
+          return a.code.localeCompare(b.code) * multiplier;
+        }
+        if (sort === 'updated_at') {
+          return ((a.updated_at ?? 0) - (b.updated_at ?? 0)) * multiplier;
+        }
+        if (sort === 'starts_at') {
+          return ((a.starts_at ?? 0) - (b.starts_at ?? 0)) * multiplier;
+        }
+        if (sort === 'ends_at') {
+          return ((a.ends_at ?? 0) - (b.ends_at ?? 0)) * multiplier;
+        }
+        return ((a.created_at ?? 0) - (b.created_at ?? 0)) * multiplier;
+      });
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({ coupons: data, pagination });
+    }
+
+    if (method === 'POST') {
+      const data = body as CreateCouponRequest;
+      if (!data.code || !data.name || !data.discount_type) {
+        return mockError('Code, name, and discount type are required', 400);
+      }
+
+      const createdAt = Date.now();
+      const newCoupon: CouponSummary = {
+        id: generateId(),
+        code: data.code,
+        name: data.name,
+        description: data.description,
+        status: data.status ?? 'active',
+        discount_type: data.discount_type,
+        discount_value: data.discount_value,
+        currency: data.currency,
+        max_redemptions: data.max_redemptions,
+        max_redemptions_per_user: data.max_redemptions_per_user,
+        min_order_cents: data.min_order_cents,
+        starts_at: data.starts_at,
+        ends_at: data.ends_at,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+
+      mockCoupons.unshift(newCoupon);
+      return mockResponse(newCoupon, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/coupons/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/coupons/{id}`);
+    const index = mockCoupons.findIndex((coupon) => coupon.id === id);
+
+    if (method === 'PATCH') {
+      if (index === -1) return mockError('Coupon not found', 404);
+      const data = body as UpdateCouponRequest;
+      mockCoupons[index] = {
+        ...mockCoupons[index],
+        ...data,
+        updated_at: Date.now(),
+      };
+      return mockResponse(mockCoupons[index]);
+    }
+
+    if (method === 'DELETE') {
+      if (index === -1) return mockError('Coupon not found', 404);
+      mockCoupons.splice(index, 1);
+      return mockResponse({ message: 'ok' });
     }
   }
 
@@ -1754,6 +2098,106 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/orders/payments/reconcile`)) {
+    if (method === 'POST') {
+      const data = body as { order_id?: number };
+      const order = mockOrders.find((item) => item.id === data?.order_id);
+      if (!order) return mockError('Order not found', 404);
+      return mockResponse({ order });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/site-settings`)) {
+    if (method === 'GET') {
+      return mockResponse({ setting: mockSiteSettings });
+    }
+
+    if (method === 'PATCH') {
+      const data = body as { name?: string; logo_url?: string };
+      mockSiteSettings.name = data.name ?? mockSiteSettings.name;
+      mockSiteSettings.logo_url = data.logo_url ?? mockSiteSettings.logo_url;
+      mockSiteSettings.updated_at = Date.now();
+      return mockResponse({ setting: mockSiteSettings });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/audit-logs`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const actorId = Number(query?.get('actor_id') ?? '');
+      const action = query?.get('action')?.trim().toLowerCase();
+      const resourceType = query?.get('resource_type')?.trim().toLowerCase();
+      const resourceId = query?.get('resource_id')?.trim();
+      const since = Number(query?.get('since') ?? '');
+      const until = Number(query?.get('until') ?? '');
+
+      let list = [...mockAuditLogs];
+
+      if (Number.isFinite(actorId) && actorId > 0) {
+        list = list.filter((log) => log.actor_id === actorId);
+      }
+      if (action) {
+        list = list.filter((log) => log.action.toLowerCase().includes(action));
+      }
+      if (resourceType) {
+        list = list.filter((log) => log.resource_type.toLowerCase().includes(resourceType));
+      }
+      if (resourceId) {
+        list = list.filter((log) => log.resource_id === resourceId);
+      }
+      if (Number.isFinite(since) && since > 0) {
+        list = list.filter((log) => log.created_at >= since);
+      }
+      if (Number.isFinite(until) && until > 0) {
+        list = list.filter((log) => log.created_at <= until);
+      }
+
+      const { data, pagination } = paginate(list, url);
+      return mockResponse({ logs: data, pagination });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/audit-logs/export`)) {
+    if (method === 'GET') {
+      const parsedUrl = parseUrl(url);
+      const query = parsedUrl?.searchParams;
+      const actorId = Number(query?.get('actor_id') ?? '');
+      const action = query?.get('action')?.trim().toLowerCase();
+      const resourceType = query?.get('resource_type')?.trim().toLowerCase();
+      const resourceId = query?.get('resource_id')?.trim();
+      const since = Number(query?.get('since') ?? '');
+      const until = Number(query?.get('until') ?? '');
+
+      let list = [...mockAuditLogs];
+
+      if (Number.isFinite(actorId) && actorId > 0) {
+        list = list.filter((log) => log.actor_id === actorId);
+      }
+      if (action) {
+        list = list.filter((log) => log.action.toLowerCase().includes(action));
+      }
+      if (resourceType) {
+        list = list.filter((log) => log.resource_type.toLowerCase().includes(resourceType));
+      }
+      if (resourceId) {
+        list = list.filter((log) => log.resource_id === resourceId);
+      }
+      if (Number.isFinite(since) && since > 0) {
+        list = list.filter((log) => log.created_at >= since);
+      }
+      if (Number.isFinite(until) && until > 0) {
+        list = list.filter((log) => log.created_at <= until);
+      }
+
+      return mockResponse({
+        logs: list,
+        total_count: list.length,
+        exported_at: Math.floor(Date.now() / 1000),
+      });
+    }
+  }
+
   if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/security-settings`)) {
     if (method === 'GET') {
       return mockResponse({ setting: normalizeSecuritySettings() });
@@ -1776,23 +2220,26 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
-  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs`)) {
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-entries`)) {
     if (method === 'GET') {
       const parsedUrl = parseUrl(url);
       const query = parsedUrl?.searchParams;
       const q = query?.get('q')?.trim().toLowerCase();
       const protocol = query?.get('protocol')?.trim().toLowerCase();
       const status = query?.get('status')?.trim().toLowerCase();
+      const bindingId = Number(query?.get('binding_id') ?? '');
 
-      let list = [...mockProtocolConfigs];
+      let list = [...mockProtocolEntries];
 
       if (q) {
-        list = list.filter((config) => {
+        list = list.filter((entry) => {
           const haystack = [
-            config.name,
-            config.protocol,
-            String(config.id),
-            ...(config.tags || []),
+            entry.name,
+            entry.binding_name,
+            entry.node_name,
+            entry.protocol,
+            String(entry.id),
+            String(entry.binding_id),
           ]
             .filter(Boolean)
             .join(' ')
@@ -1802,32 +2249,47 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       }
 
       if (protocol) {
-        list = list.filter((config) => config.protocol.toLowerCase() === protocol);
+        list = list.filter((entry) => (entry.protocol || '').toLowerCase() === protocol);
       }
 
       if (status) {
-        list = list.filter((config) => (config.status || '').toLowerCase() === status);
+        list = list.filter((entry) => (entry.status || '').toLowerCase() === status);
+      }
+
+      if (Number.isFinite(bindingId) && bindingId > 0) {
+        list = list.filter((entry) => entry.binding_id === bindingId);
       }
 
       const { data, pagination } = paginate(list, url);
       return mockResponse({
-        configs: data,
+        entries: data,
         pagination,
       });
     }
 
     if (method === 'POST') {
-      const data = body as CreateProtocolConfigRequest;
-
-      if (!data?.name || !data.protocol) {
-        return mockError('Config name and protocol are required', 400);
+      const data = body as CreateProtocolEntryRequest;
+      if (!data?.binding_id || !data.entry_address || !data.entry_port) {
+        return mockError('Binding id, entry address, and port are required', 400);
       }
 
-      const newConfig = {
+      const binding = mockProtocolBindings.find((item) => item.id === data.binding_id);
+      const node = binding?.node_id
+        ? mockNodes.find((item) => item.id === binding.node_id)
+        : undefined;
+      const newEntry: ProtocolEntrySummary = {
         id: generateId(),
-        name: data.name,
-        protocol: data.protocol,
+        name: data.name ?? (binding ? `${binding.name ?? 'Entry'} ${data.entry_address}` : undefined),
+        binding_id: data.binding_id,
+        binding_name: binding?.name,
+        node_id: node?.id,
+        node_name: node?.name,
+        protocol: data.protocol ?? binding?.protocol,
         status: data.status ?? 'active',
+        binding_status: binding?.status,
+        health_status: binding?.health_status,
+        entry_address: data.entry_address,
+        entry_port: data.entry_port,
         tags: data.tags ?? [],
         description: data.description,
         profile: data.profile,
@@ -1835,41 +2297,33 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         updated_at: Date.now(),
       };
 
-      mockProtocolConfigs.unshift(newConfig);
-      return mockResponse({ config: newConfig }, 201);
+      mockProtocolEntries.unshift(newEntry);
+      return mockResponse(newEntry, 201);
     }
   }
 
-  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs/{id}`)) {
-    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-configs/{id}`);
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-entries/{id}`)) {
+    const id = extractId(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-entries/{id}`);
 
     if (method === 'PATCH') {
-      const data = body as UpdateProtocolConfigRequest;
-      const index = mockProtocolConfigs.findIndex((config) => config.id === id);
-      if (index === -1) return mockError('Protocol config not found', 404);
+      const data = body as UpdateProtocolEntryRequest;
+      const index = mockProtocolEntries.findIndex((entry) => entry.id === id);
+      if (index === -1) return mockError('Protocol entry not found', 404);
 
-      if (data?.name !== undefined && !data.name) {
-        return mockError('Config name is required', 400);
-      }
-
-      if (data?.protocol !== undefined && !data.protocol) {
-        return mockError('Protocol is required', 400);
-      }
-
-      mockProtocolConfigs[index] = {
-        ...mockProtocolConfigs[index],
+      mockProtocolEntries[index] = {
+        ...mockProtocolEntries[index],
         ...data,
-        tags: data.tags ?? mockProtocolConfigs[index].tags ?? [],
+        profile: data.profile ?? mockProtocolEntries[index].profile,
         updated_at: Date.now(),
       };
 
-      return mockResponse({ config: mockProtocolConfigs[index] });
+      return mockResponse(mockProtocolEntries[index]);
     }
 
     if (method === 'DELETE') {
-      const index = mockProtocolConfigs.findIndex((config) => config.id === id);
-      if (index === -1) return mockError('Protocol config not found', 404);
-      mockProtocolConfigs.splice(index, 1);
+      const index = mockProtocolEntries.findIndex((entry) => entry.id === id);
+      if (index === -1) return mockError('Protocol entry not found', 404);
+      mockProtocolEntries.splice(index, 1);
       return mockResponse({}, 204);
     }
   }
@@ -1882,7 +2336,6 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       const protocol = query?.get('protocol')?.trim().toLowerCase();
       const status = query?.get('status')?.trim().toLowerCase();
       const nodeId = Number(query?.get('node_id') ?? '');
-      const configId = Number(query?.get('protocol_config_id') ?? '');
 
       let list = [...mockProtocolBindings];
 
@@ -1914,10 +2367,6 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         list = list.filter((binding) => binding.node_id === nodeId);
       }
 
-      if (Number.isFinite(configId) && configId > 0) {
-        list = list.filter((binding) => binding.protocol_config_id === configId);
-      }
-
       const { data, pagination } = paginate(list, url);
       return mockResponse({
         bindings: data,
@@ -1927,11 +2376,10 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
 
     if (method === 'POST') {
       const data = body as CreateProtocolBindingRequest;
-      if (!data?.node_id || !data.protocol_config_id || !data.role || !data.kernel_id) {
-        return mockError('Node, protocol config, role, and kernel id are required', 400);
+      if (!data?.node_id || !data.protocol || !data.role || !data.kernel_id || !data.profile) {
+        return mockError('Node, protocol, role, kernel id, and profile are required', 400);
       }
 
-      const config = mockProtocolConfigs.find((item) => item.id === data.protocol_config_id);
       const node = mockNodes.find((item) => item.id === data.node_id);
       const now = Date.now();
       const newBinding = {
@@ -1939,16 +2387,16 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         name: data.name,
         node_id: data.node_id,
         node_name: node?.name,
-        protocol_config_id: data.protocol_config_id,
-        protocol: config?.protocol,
+        protocol: data.protocol,
         role: data.role,
         listen: data.listen,
         connect: data.connect,
         access_port: data.access_port,
-        status: data.status ?? 'online',
+        status: data.status ?? 'active',
         kernel_id: data.kernel_id,
         tags: data.tags ?? [],
         description: data.description,
+        profile: data.profile,
         metadata: data.metadata,
         sync_status: 'idle',
         health_status: 'unknown',
@@ -1969,21 +2417,17 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
       const index = mockProtocolBindings.findIndex((binding) => binding.id === id);
       if (index === -1) return mockError('Protocol binding not found', 404);
 
-      const config =
-        data.protocol_config_id !== undefined
-          ? mockProtocolConfigs.find((item) => item.id === data.protocol_config_id)
-          : undefined;
       const node =
         data.node_id !== undefined ? mockNodes.find((item) => item.id === data.node_id) : undefined;
 
       mockProtocolBindings[index] = {
         ...mockProtocolBindings[index],
         ...data,
-        protocol_config_id: data.protocol_config_id ?? mockProtocolBindings[index].protocol_config_id,
         node_id: data.node_id ?? mockProtocolBindings[index].node_id,
         node_name: node?.name ?? mockProtocolBindings[index].node_name,
-        protocol: config?.protocol ?? mockProtocolBindings[index].protocol,
+        protocol: data.protocol ?? mockProtocolBindings[index].protocol,
         tags: data.tags ?? mockProtocolBindings[index].tags ?? [],
+        profile: data.profile ?? mockProtocolBindings[index].profile,
         updated_at: Date.now(),
       };
 
@@ -2016,7 +2460,7 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
 
       return mockResponse({
         binding_id: id,
-        status: 'success',
+        status: 'synced',
         message: 'Binding synced',
         synced_at: syncedAt,
       });
@@ -2052,11 +2496,32 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         }
         return {
           binding_id: binding.id,
-          status: 'success',
+          status: 'synced',
           message: 'Binding synced',
           synced_at: syncedAt,
         };
       });
+
+      return mockResponse({ results });
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/protocol-bindings/status/sync`)) {
+    if (method === 'POST') {
+      const data = body as { node_ids?: number[] } | null;
+      const nodeIds = data?.node_ids ?? [];
+      const targets = nodeIds.length
+        ? mockNodes.filter((node) => nodeIds.includes(node.id))
+        : mockNodes;
+
+      const syncedAt = Math.floor(Date.now() / 1000);
+      const results = targets.map((node) => ({
+        node_id: node.id,
+        status: node.status === 'disabled' ? 'skipped' : 'synced',
+        message: node.status === 'disabled' ? 'Node disabled' : 'Protocol status synced',
+        synced_at: syncedAt,
+        updated: mockProtocolBindings.filter((binding) => binding.node_id === node.id).length,
+      }));
 
       return mockResponse({ results });
     }
@@ -2101,6 +2566,41 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
 
       mockNodes.unshift(newNode);
       return mockResponse({ node: newNode }, 201);
+    }
+  }
+
+  if (matchPath(url, `${API_PREFIX}/${ADMIN_PREFIX}/nodes/status/sync`)) {
+    if (method === 'POST') {
+      const data = body as { node_ids?: number[] } | null;
+      const nodeIds = data?.node_ids ?? [];
+      const syncedAt = Math.floor(Date.now() / 1000);
+      const results = nodeIds.map((nodeId) => {
+        const node = mockNodes.find((item) => item.id === nodeId);
+        if (!node) {
+          return {
+            node_id: nodeId,
+            status: 'error',
+            message: 'Node not found',
+            synced_at: syncedAt,
+          };
+        }
+        if (node.status === 'disabled') {
+          return {
+            node_id: nodeId,
+            status: 'skipped',
+            message: 'Node disabled',
+            synced_at: syncedAt,
+          };
+        }
+        return {
+          node_id: nodeId,
+          status: node.status ?? 'online',
+          message: 'Status synced',
+          synced_at: syncedAt,
+        };
+      });
+
+      return mockResponse({ results });
     }
   }
 
