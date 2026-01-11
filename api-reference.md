@@ -370,10 +370,11 @@ NodeSummary 字段：
 
 - `id`、`name`、`region`、`country`、`isp`、`status`、`tags`
 - `capacity_mbps`、`description`、`access_address`、`control_endpoint`
-- `status_sync_enabled`（是否允许内核状态反向同步）
+- `status_sync_enabled`（是否允许节点状态自动同步）
 - `last_synced_at`、`updated_at`
 备注：
 - `status` 为管理端维护字段，手动禁用时为 `disabled`；运行态健康度请看协议绑定健康状态。
+- 当 `status_sync_enabled=true` 且能访问节点控制面时，服务会自动将 `status` 更新为 `online`/`offline`。
 - 节点控制面必须配置 `control_endpoint`，不再回退全局 `Kernel.HTTP`。
 - 控制面鉴权优先级：`control_access_key` + `control_secret_key` → `control_token`（无全局兜底）
 
@@ -396,7 +397,7 @@ NodeSummary 字段：
   - `ak` string（可选，兼容字段，等同 control_access_key）
   - `sk` string（可选，兼容字段，等同 control_secret_key）
   - `control_token` string（可选，节点控制面鉴权 token，写入不回显）
-  - `status_sync_enabled` bool（可选，是否允许内核状态反向同步，默认 true）
+  - `status_sync_enabled` bool（可选，是否允许节点状态自动同步，默认 true）
 - 响应：
   - `node` NodeSummary
 注：`control_token` 可直接填写 `Basic <base64(ak:sk)>` 或 `Bearer <token>`，无前缀按 `Bearer` 处理。
@@ -436,7 +437,7 @@ NodeSummary 字段：
   - `ak` string（可选，兼容字段，等同 control_access_key）
   - `sk` string（可选，兼容字段，等同 control_secret_key）
   - `control_token` string（可选，节点控制面鉴权 token，写入不回显）
-  - `status_sync_enabled` bool（可选，是否允许内核状态反向同步）
+  - `status_sync_enabled` bool（可选，是否允许节点状态自动同步）
 - 响应：
   - `node` NodeSummary
 - 示例请求体：
@@ -487,73 +488,100 @@ NodeKernelSummary 字段：
   - `synced_at` int64
   - `message` string
 
-#### GET /api/v1/{adminPrefix}/protocol-configs
+#### POST /api/v1/{adminPrefix}/nodes/status/sync
 
-- 说明：协议配置列表
-- 查询参数：`page`、`per_page`、`sort`、`direction`、`q`、`protocol`、`status`
+- 说明：手动触发节点状态同步（仅同步指定节点）
+- 请求体：
+  - `node_ids` []uint64（必填，节点 ID 列表）
 - 响应：
-  - `configs` []ProtocolConfigSummary
+  - `results` []NodeStatusSyncResult
+
+NodeStatusSyncResult 字段：
+
+- `node_id`、`status`、`message`、`synced_at`
+- `status` 可能为 `online` / `offline` / `skipped` / `error`
+- `skipped` 表示节点已 `disabled`
+- `error` 表示节点不存在或控制面地址缺失
+
+#### GET /api/v1/{adminPrefix}/protocol-entries
+
+- 说明：协议发布列表（对外入口）
+- 查询参数：`page`、`per_page`、`sort`、`direction`、`q`、`protocol`、`status`、`binding_id`
+- 响应：
+  - `entries` []ProtocolEntrySummary
   - `pagination` PaginationMeta
 
-ProtocolConfigSummary 字段：
+ProtocolEntrySummary 字段：
 
-- `id`、`name`、`protocol`、`status`、`tags`、`description`
-- `profile`、`created_at`、`updated_at`
+- `id`、`name`、`binding_id`、`binding_name`、`node_id`、`node_name`
+- `protocol`、`status`、`binding_status`、`health_status`
+- `entry_address`、`entry_port`、`tags`、`description`、`profile`
+- `created_at`、`updated_at`
 
-#### POST /api/v1/{adminPrefix}/protocol-configs
+说明：
+- `entry_address/entry_port` 为对外入口地址，可与绑定监听不一致。
+- `status` 仅影响用户可见性；`binding_status`/`health_status` 来自绑定健康状态。
 
-- 说明：创建协议配置
+#### POST /api/v1/{adminPrefix}/protocol-entries
+
+- 说明：创建协议发布
 - 请求体：
-  - `name` string
-  - `protocol` string
+  - `binding_id` uint64
+  - `entry_address` string
+  - `entry_port` int
+  - `protocol` string（可选，默认继承绑定协议）
   - `status` string（可选）
   - `tags` []string（可选）
   - `description` string（可选）
-  - `profile` map（可选）
+  - `profile` map（可选，对外公开配置）
 - 响应：
-  - ProtocolConfigSummary
+  - ProtocolEntrySummary
 
-#### PATCH /api/v1/{adminPrefix}/protocol-configs/{id}
+#### PATCH /api/v1/{adminPrefix}/protocol-entries/{id}
 
-- 说明：更新协议配置
+- 说明：更新协议发布
 - 路径参数：`id` uint64
 - 请求体：同创建（均可选）
 - 响应：
-  - ProtocolConfigSummary
+  - ProtocolEntrySummary
 
-#### DELETE /api/v1/{adminPrefix}/protocol-configs/{id}
+#### DELETE /api/v1/{adminPrefix}/protocol-entries/{id}
 
-- 说明：删除协议配置
+- 说明：删除协议发布
 - 路径参数：`id` uint64
 - 响应：204
 
 #### GET /api/v1/{adminPrefix}/protocol-bindings
 
 - 说明：协议绑定列表
-- 查询参数：`page`、`per_page`、`sort`、`direction`、`q`、`status`、`protocol`、`node_id`、`protocol_config_id`
+- 查询参数：`page`、`per_page`、`sort`、`direction`、`q`、`status`、`protocol`、`node_id`
 - 响应：
   - `bindings` []ProtocolBindingSummary
   - `pagination` PaginationMeta
 
 ProtocolBindingSummary 字段：
 
-- `id`、`name`、`node_id`、`node_name`、`protocol_config_id`、`protocol`
+- `id`、`name`、`node_id`、`node_name`、`protocol`
 - `role`、`listen`、`connect`、`access_port`、`status`、`kernel_id`（字符串）
 - `kernel_id` 需与内核侧协议 ID 一致，通常不是数字
 - `sync_status`、`health_status`、`last_synced_at`、`last_heartbeat_at`、`last_sync_error`
-- `tags`、`description`、`metadata`
+- `tags`、`description`、`profile`、`metadata`
 - `created_at`、`updated_at`
+
+说明：
+- `listen` 为空或仅端口时，会用 `access_port` 归一化为 `0.0.0.0:<port>` 供内核使用。
 
 #### POST /api/v1/{adminPrefix}/protocol-bindings
 
 - 说明：创建协议绑定
 - 请求体：
   - `node_id` uint64
-  - `protocol_config_id` uint64
+  - `protocol` string
   - `role` string
+  - `profile` map（必填，内核实际配置）
   - `listen` string（可选）
   - `connect` string（可选）
-  - `access_port` int（可选，客户端入口端口）
+  - `access_port` int（可选，内核监听端口）
   - `status` string（可选）
   - `kernel_id` string（必填，内核协议标识，通常为字符串）
   - `tags` []string（可选）
@@ -591,6 +619,19 @@ ProtocolBindingSummary 字段：
   - `node_ids` []uint64（可选）
 - 响应：
   - `results` []ProtocolBindingSyncResult
+
+#### POST /api/v1/{adminPrefix}/protocol-bindings/status/sync
+
+- 说明：手动反向同步协议健康状态
+- 请求体：
+  - `node_ids` []uint64（必填，节点 ID 列表）
+- 响应：
+  - `results` []ProtocolBindingStatusSyncResult
+
+ProtocolBindingStatusSyncResult 字段：
+
+- `node_id`、`status`、`message`、`synced_at`、`updated`
+- `status` 可能为 `synced` / `error` / `skipped`
 
 #### GET /api/v1/{adminPrefix}/subscriptions
 
@@ -1060,7 +1101,7 @@ AnnouncementSummary 字段：
 
 SiteSetting 字段：
 
-- `id`、`name`、`logo_url`
+- `id`、`name`、`logo_url`、`access_domain`
 - `created_at`、`updated_at`
 
 #### PATCH /api/v1/{adminPrefix}/site-settings
@@ -1069,6 +1110,7 @@ SiteSetting 字段：
 - 请求体：
   - `name` string（可选）
   - `logo_url` string（可选）
+  - `access_domain` string（可选）
 - 响应：同 GET
 
 #### GET /api/v1/{adminPrefix}/security-settings
@@ -1219,6 +1261,16 @@ AdminOrderDetail 字段：
 - 请求体：`records` 数组，字段见 `KernelTrafficRecord`
 - 响应：
   - `accepted`、`failed`
+
+#### POST /api/v1/kernel/service-events
+
+- 说明：内核服务事件回调（免登录，Webhook 专用）
+- 认证：`X-ZNP-Webhook-Token`
+- 请求体：`event` + `payload`（如 `user.traffic.reported`，payload 包含 `user_id` 与 `current.used`/`current.remaining`）
+- 备注：面板侧优先使用 `subscription_id`，否则使用 `user_id` 更新订阅已用流量
+- 响应：
+  - `status`
+  - `accepted`、`failed`（当事件为 `user.traffic.reported`）
 
 #### POST /api/v1/kernel/events
 

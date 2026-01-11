@@ -8,7 +8,7 @@
 | ---- | ---- | ---- |
 | 仪表盘 | `/api/v1/{admin}/dashboard` | 展示模块导航、权限控制 |
 | 用户管理 | `/api/v1/{admin}/users` | 用户列表、创建、禁用、角色调整、重置密码、强制下线 |
-| 节点管理 | `/api/v1/{admin}/nodes` | 节点查询、创建、更新、禁用、删除（软删除）、协议内核同步 |
+| 节点管理 | `/api/v1/{admin}/nodes` | 节点查询、创建、更新、禁用、删除（软删除）、协议内核同步、状态同步 |
 | 订阅模板 | `/api/v1/{admin}/subscription-templates` | 模板 CRUD、发布、历史追溯 |
 | 订阅管理 | `/api/v1/{admin}/subscriptions` | 订阅列表、创建、调整、禁用、延长有效期 |
 | 套餐管理 | `/api/v1/{admin}/plans` | 套餐列表、创建、更新，字段涵盖价格、时长、流量限制等 |
@@ -78,9 +78,12 @@
 
 - `POST /api/v1/{admin}/nodes`：创建节点基础信息与控制面信息（`control_endpoint`/AK-SK/`control_token`）。
 - `PATCH /api/v1/{admin}/nodes/{id}`：更新节点元数据、控制面地址与标签（节点控制面必填，不再回退全局）。
-- `status_sync_enabled`：控制是否允许内核状态反向同步（默认 true）。
+- `status_sync_enabled`：控制是否允许节点状态自动同步（默认 true）。
+- 启用后，服务会定时调用内核 `GET /v1/status`，将节点 `status` 更新为 `online`/`offline`。
 - `POST /api/v1/{admin}/nodes/{id}/disable`：下线/禁用节点（替代物理删除）。
 - `POST /api/v1/{admin}/nodes/{id}/kernels/sync`：触发节点内核配置同步（`protocol` 可选）。
+- `POST /api/v1/{admin}/nodes/status/sync`：手动同步节点状态（仅处理指定 `node_ids`）。
+- `POST /api/v1/{admin}/protocol-bindings/status/sync`：手动反向同步协议健康状态（仅处理指定 `node_ids`）。
 - `GET /api/v1/user/nodes`：用户侧查看节点运行状态，隐藏内核端点与配置等敏感信息。
 
 创建节点字段提示：
@@ -96,6 +99,18 @@
 3. 服务端拉取内核配置并更新记录，立即返回 `revision` 与 `synced_at` 等结果字段。
 4. 若开启 Prometheus，观察 `znp_node_sync_operations_total` 与 `znp_node_sync_duration_seconds` 判断成功率与耗时。
 
+### 节点状态同步流程
+
+1. 定时任务按 `Kernel.StatusPollInterval` 轮询 `/v1/status`，成功则更新节点 `status=online`，失败更新为 `offline`。
+2. 需要即时更新时，可调用 `POST /api/v1/{admin}/nodes/status/sync` 并传入 `node_ids`。
+3. 响应中返回每个节点的 `status` 与 `message`，便于定位控制面鉴权或地址问题。
+
+### 协议健康反向同步流程
+
+1. 调用 `POST /api/v1/{admin}/protocol-bindings/status/sync` 并传入 `node_ids`。
+2. 服务端按节点控制面分组拉取 `/v1/status`，将协议绑定 `health_status` 更新为 `healthy/degraded/unhealthy/offline/unknown`。
+3. 响应中返回每个节点的同步结果与更新数量。
+
 | 接口 | HTTP 状态码 | 说明 | 排障建议 |
 | ---- | ----------- | ---- | -------- |
 | `GET /api/v1/{admin}/nodes` | `400` | 过滤条件非法 | 确认查询参数（如 `protocol`、`status`）是否在允许范围内。 |
@@ -103,15 +118,20 @@
 | 同上 | `404` | 节点不存在 | 检查节点是否被删除，确认 `Admin.RoutePrefix` 与 URL 中的 `{id}` 是否正确。 |
 | 同上 | `500` | 内核同步失败 | 检查内核服务地址、令牌是否正确，必要时查看 `Kernel` 配置或抓取 gRPC/HTTP 日志。 |
 
-### 协议配置与绑定流程
+### 协议绑定与发布流程
 
-1. 创建协议配置 `POST /api/v1/{admin}/protocol-configs`：必填 `name`、`protocol`；`profile` 可选（未填时需在绑定阶段提供）。
-2. 创建协议绑定 `POST /api/v1/{admin}/protocol-bindings`：必填 `node_id`、`protocol`、`role`（`listener`/`connector`）、`kernel_id`（字符串，需与内核协议 ID 对齐）；当未指定 `protocol_config_id` 时，`profile` 必填；常用字段 `listen`、`connect`、`access_port`。
-3. 更新绑定（可选）`PATCH /api/v1/{admin}/protocol-bindings/{id}`：调整状态、端口、标签或健康字段。
+1. 创建协议绑定 `POST /api/v1/{admin}/protocol-bindings`：必填 `node_id`、`protocol`、`role`（`listener`/`connector`）、`kernel_id`（字符串，需与内核协议 ID 对齐）、`profile`（内核实际配置）；常用字段 `listen`、`connect`、`access_port`。
+2. 创建协议发布 `POST /api/v1/{admin}/protocol-entries`：必填 `binding_id`、`entry_address`、`entry_port`；`profile` 填写对外公开配置（如 reality 公钥、short_id 等）。
+3. 更新绑定或发布（可选）：`PATCH /api/v1/{admin}/protocol-bindings/{id}` / `PATCH /api/v1/{admin}/protocol-entries/{id}`。
+
+补充说明：
+- `entry_address/entry_port` 为对外入口地址，可与绑定的 `listen/access_port` 不一致，用于中转或分流场景。
+- 协议发布 `status` 仅影响用户可见性；健康状态以协议绑定 `health_status` 为准。
+- 绑定 `listen` 为空或仅端口时，会用 `access_port` 归一化为 `0.0.0.0:<port>` 供内核使用。
 
 ### 协议绑定同步流程
 
-1. 管理端创建协议配置与绑定（`/protocol-configs`、`/protocol-bindings`）。
+1. 管理端创建协议绑定与发布（`/protocol-bindings`、`/protocol-entries`）。
 2. 触发单条或批量下发：`POST /api/v1/{admin}/protocol-bindings/{id}/sync` 或 `/protocol-bindings/sync`。
 3. 同步结果直接返回，包含 `binding_id`、`status`、`message`、`synced_at`。
 4. 若未配置内核控制面，返回 `status=error` 且 `message` 提示配置缺失。
