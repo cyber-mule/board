@@ -1,5 +1,28 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { adminApi } from '../../../api';
 import { formatCurrency, formatDateTime } from '../../../utils/format';
 import type { AdminOrderDetail, CancelOrderRequest, PaginationMeta, PayOrderRequest, RefundOrderRequest } from '../../../api/types';
@@ -23,8 +46,8 @@ const page = ref(1);
 const pagination = ref<PaginationMeta | null>(null);
 
 const filters = reactive({
-  status: '',
-  payment_status: '',
+  status: '__all__' as number | string,
+  payment_status: '__all__' as number | string,
   payment_method: '',
   number: '',
   sort: 'updated',
@@ -48,24 +71,66 @@ const cancelForm = reactive<CancelOrderRequest>({
 const refundForm = reactive<RefundOrderRequest>({
   amount_cents: 0,
   reason: '',
-  operator: '',
 });
 
-function statusTone(value?: string): string {
+function statusVariant(value?: number): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (value) {
-    case 'paid':
-    case 'succeeded':
-      return 'status-pill status-pill--ok';
-    case 'pending':
-    case 'pending_payment':
-      return 'status-pill status-pill--warn';
-    case 'failed':
-    case 'payment_failed':
-    case 'cancelled':
-    case 'refunded':
-      return 'status-pill status-pill--danger';
+    case 2:
+      return 'default';
+    case 1:
+      return 'secondary';
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+      return 'destructive';
     default:
-      return 'status-pill status-pill--muted';
+      return 'outline';
+  }
+}
+
+function orderStatusLabel(value?: number) {
+  switch (value) {
+    case 1:
+      return '待支付';
+    case 2:
+      return '已支付';
+    case 3:
+      return '支付失败';
+    case 4:
+      return '已取消';
+    case 5:
+      return '部分退款';
+    case 6:
+      return '已退款';
+    default:
+      return '未知';
+  }
+}
+
+function paymentStatusLabel(value?: number) {
+  switch (value) {
+    case 1:
+      return '待处理';
+    case 2:
+      return '成功';
+    case 3:
+      return '失败';
+    default:
+      return '未知';
+  }
+}
+
+function paymentMethodLabel(value?: string) {
+  switch (value) {
+    case 'balance':
+      return '余额';
+    case 'external':
+      return '外部';
+    case 'manual':
+      return '手工';
+    default:
+      return value || '-';
   }
 }
 
@@ -77,9 +142,15 @@ async function loadOrders() {
     const response = await adminApi.fetchAdminOrders({
       page: 1,
       per_page: perPage,
-      status: filters.status || undefined,
-      payment_status: filters.payment_status || undefined,
-      payment_method: filters.payment_method || undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      payment_status:
+        filters.payment_status && filters.payment_status !== '__all__'
+          ? filters.payment_status
+          : undefined,
+      payment_method:
+        filters.payment_method && filters.payment_method !== '__all__'
+          ? filters.payment_method
+          : undefined,
       number: filters.number || undefined,
       user_id: filters.user_id ? Number(filters.user_id) : undefined,
       sort: filters.sort,
@@ -89,7 +160,7 @@ async function loadOrders() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? 1;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load orders';
+    errorMessage.value = error instanceof Error ? error.message : '加载订单失败';
   } finally {
     loading.value = false;
   }
@@ -109,9 +180,15 @@ async function loadMore() {
     const response = await adminApi.fetchAdminOrders({
       page: targetPage,
       per_page: perPage,
-      status: filters.status || undefined,
-      payment_status: filters.payment_status || undefined,
-      payment_method: filters.payment_method || undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      payment_status:
+        filters.payment_status && filters.payment_status !== '__all__'
+          ? filters.payment_status
+          : undefined,
+      payment_method:
+        filters.payment_method && filters.payment_method !== '__all__'
+          ? filters.payment_method
+          : undefined,
       number: filters.number || undefined,
       user_id: filters.user_id ? Number(filters.user_id) : undefined,
       sort: filters.sort,
@@ -121,7 +198,7 @@ async function loadMore() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load more orders';
+    errorMessage.value = error instanceof Error ? error.message : '加载更多订单失败';
   } finally {
     isLoadingMore.value = false;
   }
@@ -136,7 +213,7 @@ async function selectOrder(order: AdminOrderDetail) {
     const response = await adminApi.fetchAdminOrderDetail(order.id);
     selectedOrder.value = response.order;
   } catch (error) {
-    detailError.value = error instanceof Error ? error.message : 'Failed to load order detail';
+    detailError.value = error instanceof Error ? error.message : '加载订单详情失败';
   } finally {
     detailLoading.value = false;
   }
@@ -165,19 +242,17 @@ async function handlePay() {
   try {
     const response = await adminApi.payAdminOrder(selectedOrder.value.id, payForm);
     closePayModal();
-    
-    // Update the order in the list
+
     const index = orders.value.findIndex(o => o.id === selectedOrder.value!.id);
     if (index !== -1) {
       orders.value[index] = response.order;
     }
-    
-    // Update selectedOrder if viewing details
+
     if (selectedOrder.value.id === response.order.id) {
       selectedOrder.value = response.order;
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to mark order as paid';
+    errorMessage.value = error instanceof Error ? error.message : '标记支付失败';
   } finally {
     isSaving.value = false;
   }
@@ -203,34 +278,32 @@ async function handleCancel() {
   try {
     const response = await adminApi.cancelAdminOrder(selectedOrder.value.id, cancelForm);
     closeCancelModal();
-    
-    // Update the order in the list
+
     const index = orders.value.findIndex(o => o.id === selectedOrder.value!.id);
     if (index !== -1) {
       orders.value[index] = response.order;
     }
-    
-    // Update selectedOrder if viewing details
+
     if (selectedOrder.value.id === response.order.id) {
       selectedOrder.value = response.order;
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to cancel order';
+    errorMessage.value = error instanceof Error ? error.message : '取消订单失败';
   } finally {
     isSaving.value = false;
   }
 }
 
 function canPay(order: AdminOrderDetail): boolean {
-  return order.status === 'pending_payment' || order.payment_status === 'pending';
+  return order.status === 1 || order.payment_status === 1;
 }
 
 function canCancel(order: AdminOrderDetail): boolean {
-  return order.status !== 'cancelled' && order.status !== 'refunded';
+  return order.status !== 4 && order.status !== 6;
 }
 
 function canRefund(order: AdminOrderDetail): boolean {
-  return order.status === 'paid' && (!order.refunded_cents || order.refunded_cents < order.total_cents);
+  return order.status === 2 && (!order.refunded_cents || order.refunded_cents < order.total_cents);
 }
 
 function openRefundModal(order: AdminOrderDetail) {
@@ -238,7 +311,6 @@ function openRefundModal(order: AdminOrderDetail) {
   const maxRefundAmount = order.total_cents - (order.refunded_cents || 0);
   refundForm.amount_cents = maxRefundAmount;
   refundForm.reason = '';
-  refundForm.operator = '';
   showRefundModal.value = true;
   errorMessage.value = '';
 }
@@ -247,42 +319,39 @@ function closeRefundModal() {
   showRefundModal.value = false;
   refundForm.amount_cents = 0;
   refundForm.reason = '';
-  refundForm.operator = '';
 }
 
 async function handleRefund() {
   if (!selectedOrder.value) return;
-  
+
   if (refundForm.amount_cents <= 0) {
-    errorMessage.value = 'Refund amount must be greater than 0';
+    errorMessage.value = '退款金额必须大于 0';
     return;
   }
-  
+
   const maxRefundAmount = selectedOrder.value.total_cents - (selectedOrder.value.refunded_cents || 0);
   if (refundForm.amount_cents > maxRefundAmount) {
-    errorMessage.value = `Refund amount cannot exceed ${formatCurrency(maxRefundAmount, selectedOrder.value.currency)}`;
+    errorMessage.value = `退款金额不能超过 ${formatCurrency(maxRefundAmount, selectedOrder.value.currency)}`;
     return;
   }
-  
+
   isSaving.value = true;
   errorMessage.value = '';
 
   try {
     const response = await adminApi.refundAdminOrder(selectedOrder.value.id, refundForm);
     closeRefundModal();
-    
-    // Update the order in the list
+
     const index = orders.value.findIndex(o => o.id === selectedOrder.value!.id);
     if (index !== -1) {
       orders.value[index] = response.order;
     }
-    
-    // Update selectedOrder if viewing details
+
     if (selectedOrder.value.id === response.order.id) {
       selectedOrder.value = response.order;
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to refund order';
+    errorMessage.value = error instanceof Error ? error.message : '退款失败';
   } finally {
     isSaving.value = false;
   }
@@ -297,563 +366,407 @@ onMounted(() => {
   <div class="page-section">
     <header class="page-section__header">
       <div>
-        <p class="page__eyebrow">Orders</p>
-        <h3 class="page-section__title">Order management</h3>
-        <p class="page__subtitle">Review payment status and customer context.</p>
+        <p class="page__eyebrow">订单</p>
+        <h3 class="page-section__title">订单管理</h3>
+        <p class="page__subtitle">查看支付状态与客户信息。</p>
       </div>
       <div class="page-section__actions">
-        <button class="button button--ghost" type="button" @click="loadOrders" :disabled="loading">
-          {{ loading ? 'Refreshing...' : 'Refresh' }}
-        </button>
+        <Button variant="secondary" type="button" @click="loadOrders" :disabled="loading">
+          {{ loading ? '刷新中...' : '刷新列表' }}
+        </Button>
       </div>
     </header>
 
-    <form class="filter-bar" @submit.prevent="loadOrders">
-      <label class="form__field form__field--compact">
-        <span>Order #</span>
-        <input v-model="filters.number" type="search" placeholder="Search number" />
-      </label>
-      <label class="form__field form__field--compact">
-        <span>User ID</span>
-        <input v-model="filters.user_id" type="number" placeholder="User id" />
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Status</span>
-        <select v-model="filters.status">
-          <option value="">All</option>
-          <option value="pending_payment">Pending payment</option>
-          <option value="paid">Paid</option>
-          <option value="payment_failed">Payment failed</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="refunded">Refunded</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Payment status</span>
-        <select v-model="filters.payment_status">
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="succeeded">Succeeded</option>
-          <option value="failed">Failed</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Method</span>
-        <select v-model="filters.payment_method">
-          <option value="">All</option>
-          <option value="balance">Balance</option>
-          <option value="external">External</option>
-          <option value="manual">Manual</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Sort</span>
-        <select v-model="filters.sort">
-          <option value="updated">Updated</option>
-          <option value="total">Total</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Direction</span>
-        <select v-model="filters.direction">
-          <option value="desc">Descending</option>
-          <option value="asc">Ascending</option>
-        </select>
-      </label>
-      <button class="button" type="submit" :disabled="loading">Apply</button>
+    <form class="form-grid form-grid--wide" @submit.prevent="loadOrders">
+      <div class="stack stack--tight">
+        <Label>订单号</Label>
+        <Input v-model="filters.number" type="search" placeholder="搜索订单号" />
+      </div>
+      <div class="stack stack--tight">
+        <Label>用户 ID</Label>
+        <Input v-model="filters.user_id" type="number" placeholder="用户 ID" />
+      </div>
+      <div class="stack stack--tight">
+        <Label>订单状态</Label>
+        <Select v-model="filters.status">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem :value="1">待支付</SelectItem>
+            <SelectItem :value="2">已支付</SelectItem>
+            <SelectItem :value="3">支付失败</SelectItem>
+            <SelectItem :value="4">已取消</SelectItem>
+            <SelectItem :value="5">部分退款</SelectItem>
+            <SelectItem :value="6">已退款</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>支付状态</Label>
+        <Select v-model="filters.payment_status">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem :value="1">待处理</SelectItem>
+            <SelectItem :value="2">成功</SelectItem>
+            <SelectItem :value="3">失败</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>支付方式</Label>
+        <Select v-model="filters.payment_method">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem value="balance">余额</SelectItem>
+            <SelectItem value="external">外部</SelectItem>
+            <SelectItem value="manual">手工</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>排序</Label>
+        <Select v-model="filters.sort">
+          <SelectTrigger>
+            <SelectValue placeholder="请选择" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updated">最近更新</SelectItem>
+            <SelectItem value="total">金额</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>方向</Label>
+        <Select v-model="filters.direction">
+          <SelectTrigger>
+            <SelectValue placeholder="请选择" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="desc">降序</SelectItem>
+            <SelectItem value="asc">升序</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="cluster cluster--end">
+        <Button type="submit" :disabled="loading">应用筛选</Button>
+      </div>
     </form>
 
-    <p v-if="errorMessage" class="alert">{{ errorMessage }}</p>
+    <Alert v-if="errorMessage" variant="destructive">
+      <AlertTitle>操作失败</AlertTitle>
+      <AlertDescription>{{ errorMessage }}</AlertDescription>
+    </Alert>
 
     <div class="split-grid">
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Orders</h3>
-            <p class="panel-card__meta">Latest {{ orders.length }} orders</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>订单列表</CardTitle>
+          <p class="panel-card__meta">共 {{ orders.length }} 笔订单</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载订单...</p>
+          <p v-else-if="orders.length === 0" class="panel-card__empty">暂无订单。</p>
+          <ul v-else class="data-list">
+            <li
+              v-for="order in orders"
+              :key="order.id"
+              :class="['data-row', 'data-row--stack', { 'data-row--selected': selectedOrder?.id === order.id }]"
+            >
+              <div>
+                <p class="data-row__title">
+                  #{{ order.number }} · {{ formatCurrency(order.total_cents, order.currency) }}
+                </p>
+                <p class="data-row__meta">
+                  {{ order.user?.email || '未知用户' }} ·
+                  {{ formatDateTime(order.updated_at || order.created_at) }}
+                </p>
+                <div class="cluster">
+                  <Badge :variant="statusVariant(order.status)">{{ orderStatusLabel(order.status) }}</Badge>
+                  <Badge :variant="statusVariant(order.payment_status)">
+                    {{ paymentStatusLabel(order.payment_status) }}
+                  </Badge>
+                </div>
+              </div>
+              <div class="data-row__aside">
+                <Button
+                  v-if="canPay(order)"
+                  size="sm"
+                  type="button"
+                  @click="openPayModal(order)"
+                >
+                  标记已支付
+                </Button>
+                <Button
+                  v-if="canCancel(order)"
+                  size="sm"
+                  variant="secondary"
+                  type="button"
+                  @click="openCancelModal(order)"
+                >
+                  取消
+                </Button>
+                <Button
+                  v-if="canRefund(order)"
+                  size="sm"
+                  variant="destructive"
+                  type="button"
+                  @click="openRefundModal(order)"
+                >
+                  退款
+                </Button>
+                <Button variant="ghost" size="sm" type="button" @click="selectOrder(order)">
+                  详情
+                </Button>
+              </div>
+            </li>
+          </ul>
+          <div v-if="pagination?.has_next" class="list-footer">
+            <Button variant="ghost" type="button" @click="loadMore" :disabled="isLoadingMore">
+              {{ isLoadingMore ? '加载中...' : '加载更多' }}
+            </Button>
           </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading orders...</div>
-        <div v-else-if="orders.length === 0" class="panel-card__empty">No orders found.</div>
-        <ul v-else class="data-list">
-          <li
-            v-for="order in orders"
-            :key="order.id"
-            :class="['data-row', 'data-row--stack', { 'data-row--selected': selectedOrder?.id === order.id }]"
-          >
-            <div>
-              <p class="data-row__title">
-                #{{ order.number }} · {{ formatCurrency(order.total_cents, order.currency) }}
-              </p>
-              <p class="data-row__meta">
-                {{ order.user?.email || 'Unknown user' }} ·
-                {{ formatDateTime(order.updated_at || order.created_at) }}
-              </p>
-              <div class="tag-list">
-                <span :class="statusTone(order.status)">{{ order.status }}</span>
-                <span :class="statusTone(order.payment_status)">{{ order.payment_status }}</span>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>订单详情</CardTitle>
+          <p class="panel-card__meta">
+            {{ selectedOrder ? `订单 #${selectedOrder.number}` : '请选择订单' }}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="!selectedOrder" class="panel-card__empty">请先选择订单查看详情。</p>
+          <p v-else-if="detailLoading" class="panel-card__empty">正在加载订单详情...</p>
+          <p v-else-if="detailError" class="panel-card__empty">{{ detailError }}</p>
+          <div v-else class="order-detail">
+            <div class="detail-grid">
+              <div>
+                <p class="detail-label">用户</p>
+                <p class="detail-value">{{ selectedOrder.user?.display_name || '-' }}</p>
+              </div>
+              <div>
+                <p class="detail-label">邮箱</p>
+                <p class="detail-value">{{ selectedOrder.user?.email || '-' }}</p>
+              </div>
+              <div>
+                <p class="detail-label">订单状态</p>
+                <p class="detail-value">{{ orderStatusLabel(selectedOrder.status) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">支付状态</p>
+                <p class="detail-value">{{ paymentStatusLabel(selectedOrder.payment_status) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">支付方式</p>
+                <p class="detail-value">{{ paymentMethodLabel(selectedOrder.payment_method) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">订单金额</p>
+                <p class="detail-value">
+                  {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
+                </p>
               </div>
             </div>
-            <div class="data-row__aside">
-              <button
-                v-if="canPay(order)"
-                class="button button--small button--primary"
-                type="button"
-                @click="openPayModal(order)"
-              >
-                Mark Paid
-              </button>
-              <button
-                v-if="canCancel(order)"
-                class="button button--small button--secondary"
-                type="button"
-                @click="openCancelModal(order)"
-              >
-                Cancel
-              </button>
-              <button
-                v-if="canRefund(order)"
-                class="button button--small button--warning"
-                type="button"
-                @click="openRefundModal(order)"
-              >
-                Refund
-              </button>
-              <button class="button button--ghost button--small" type="button" @click="selectOrder(order)">
-                Details
-              </button>
+            <div class="detail-section">
+              <h4>商品明细</h4>
+              <div v-if="!selectedOrder.items?.length" class="panel-card__empty">暂无商品。</div>
+              <ul v-else class="data-list data-list--compact">
+                <li v-for="item in selectedOrder.items" :key="item.id" class="data-row">
+                  <div>
+                    <p class="data-row__title">{{ item.name }}</p>
+                    <p class="data-row__meta">数量 {{ item.quantity }}</p>
+                  </div>
+                  <span class="data-row__title">
+                    {{ formatCurrency(item.subtotal_cents, item.currency) }}
+                  </span>
+                </li>
+              </ul>
             </div>
-          </li>
-        </ul>
-        <div v-if="pagination?.has_next" class="list-footer">
-          <button class="button button--ghost" type="button" @click="loadMore" :disabled="isLoadingMore">
-            {{ isLoadingMore ? 'Loading...' : 'Load more' }}
-          </button>
-        </div>
-      </article>
-
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Order detail</h3>
-            <p class="panel-card__meta">
-              {{ selectedOrder ? `Order #${selectedOrder.number}` : 'Select an order' }}
-            </p>
-          </div>
-        </header>
-        <div v-if="!selectedOrder" class="panel-card__empty">Choose an order to view details.</div>
-        <div v-else-if="detailLoading" class="panel-card__empty">Loading order detail...</div>
-        <div v-else-if="detailError" class="panel-card__empty">{{ detailError }}</div>
-        <div v-else class="order-detail">
-          <div class="detail-grid">
-            <div>
-              <p class="detail-label">User</p>
-              <p class="detail-value">{{ selectedOrder.user?.display_name || '-' }}</p>
+            <div class="detail-section">
+              <h4>支付记录</h4>
+              <div v-if="!selectedOrder.payments?.length" class="panel-card__empty">暂无支付记录。</div>
+              <ul v-else class="data-list data-list--compact">
+                <li v-for="payment in selectedOrder.payments" :key="payment.id" class="data-row">
+                  <div>
+                    <p class="data-row__title">{{ payment.provider || payment.method || '支付' }}</p>
+                    <p class="data-row__meta">{{ paymentStatusLabel(payment.status) }}</p>
+                  </div>
+                  <span class="data-row__title">
+                    {{ formatCurrency(payment.amount_cents, payment.currency) }}
+                  </span>
+                </li>
+              </ul>
             </div>
-            <div>
-              <p class="detail-label">Email</p>
-              <p class="detail-value">{{ selectedOrder.user?.email || '-' }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Status</p>
-              <p class="detail-value">{{ selectedOrder.status }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Payment</p>
-              <p class="detail-value">{{ selectedOrder.payment_status }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Method</p>
-              <p class="detail-value">{{ selectedOrder.payment_method || '-' }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Total</p>
-              <p class="detail-value">
-                {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
-              </p>
+            <div class="detail-section">
+              <h4>退款记录</h4>
+              <div v-if="!selectedOrder.refunds?.length" class="panel-card__empty">暂无退款记录。</div>
+              <ul v-else class="data-list data-list--compact">
+                <li v-for="refund in selectedOrder.refunds" :key="refund.id" class="data-row">
+                  <div>
+                    <p class="data-row__title">{{ refund.reason || '退款' }}</p>
+                    <p class="data-row__meta">{{ formatDateTime(refund.created_at) }}</p>
+                  </div>
+                  <span class="data-row__title">
+                    {{ formatCurrency(refund.amount_cents, selectedOrder.currency) }}
+                  </span>
+                </li>
+              </ul>
             </div>
           </div>
-          <div class="detail-section">
-            <h4>Items</h4>
-            <div v-if="!selectedOrder.items?.length" class="panel-card__empty">No items.</div>
-            <ul v-else class="data-list data-list--compact">
-              <li v-for="item in selectedOrder.items" :key="item.id" class="data-row">
-                <div>
-                  <p class="data-row__title">{{ item.name }}</p>
-                  <p class="data-row__meta">Qty {{ item.quantity }}</p>
-                </div>
-                <span class="data-row__title">
-                  {{ formatCurrency(item.subtotal_cents, item.currency) }}
-                </span>
-              </li>
-            </ul>
-          </div>
-          <div class="detail-section">
-            <h4>Payments</h4>
-            <div v-if="!selectedOrder.payments?.length" class="panel-card__empty">No payments.</div>
-            <ul v-else class="data-list data-list--compact">
-              <li v-for="payment in selectedOrder.payments" :key="payment.id" class="data-row">
-                <div>
-                  <p class="data-row__title">{{ payment.provider || payment.method || 'Payment' }}</p>
-                  <p class="data-row__meta">{{ payment.status || 'unknown' }}</p>
-                </div>
-                <span class="data-row__title">
-                  {{ formatCurrency(payment.amount_cents, payment.currency) }}
-                </span>
-              </li>
-            </ul>
-          </div>
-          <div class="detail-section">
-            <h4>Refunds</h4>
-            <div v-if="!selectedOrder.refunds?.length" class="panel-card__empty">No refunds.</div>
-            <ul v-else class="data-list data-list--compact">
-              <li v-for="refund in selectedOrder.refunds" :key="refund.id" class="data-row">
-                <div>
-                  <p class="data-row__title">{{ refund.reason || 'Refund' }}</p>
-                  <p class="data-row__meta">{{ formatDateTime(refund.created_at) }}</p>
-                </div>
-                <span class="data-row__title">
-                  {{ formatCurrency(refund.amount_cents, selectedOrder.currency) }}
-                </span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </article>
+        </CardContent>
+      </Card>
     </div>
 
-    <!-- Pay Order Modal -->
-    <div v-if="showPayModal" class="modal-overlay" @click.self="closePayModal">
-      <div class="modal modal--medium">
-        <header class="modal__header">
-          <h3>Mark Order as Paid</h3>
-          <button class="modal__close" type="button" @click="closePayModal">×</button>
-        </header>
-        <div class="modal__content">
-          <p v-if="selectedOrder" class="modal-info">
-            Order #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
+    <Dialog v-model:open="showPayModal">
+      <DialogContent class="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>标记已支付</DialogTitle>
+          <DialogDescription>用于线下或人工确认订单已完成支付。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <p v-if="selectedOrder" class="text-sm text-muted-foreground">
+            订单 #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
           </p>
-          
-          <div class="form-group">
-            <label for="pay-method">Payment Method</label>
-            <select id="pay-method" v-model="payForm.payment_method" class="select">
-              <option value="manual">Manual</option>
-              <option value="balance">Balance</option>
-              <option value="external">External</option>
-            </select>
+          <div class="stack stack--tight">
+            <Label>支付方式</Label>
+            <Select v-model="payForm.payment_method">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manual">手工</SelectItem>
+                <SelectItem value="balance">余额</SelectItem>
+                <SelectItem value="external">外部</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-
-          <div class="form-group">
-            <label for="pay-reference">Reference / Transaction ID</label>
-            <input
+          <div class="stack stack--tight">
+            <Label for="pay-reference">参考号 / 交易号</Label>
+            <Input
               id="pay-reference"
               v-model="payForm.reference"
               type="text"
-              class="input"
-              placeholder="Optional reference ID"
+              placeholder="可选，便于核对"
             />
           </div>
-
-          <div class="form-group">
-            <label for="pay-note">Note</label>
-            <textarea
+          <div class="stack stack--tight">
+            <Label for="pay-note">备注</Label>
+            <Textarea
               id="pay-note"
               v-model="payForm.note"
-              class="input"
               rows="3"
-              placeholder="Optional internal note"
-            ></textarea>
+              placeholder="可选备注"
+            />
           </div>
-
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input v-model="payForm.charge_balance" type="checkbox" />
-              <span>Deduct from user balance</span>
-            </label>
-            <p class="form-help">If enabled, the order amount will be deducted from user's account balance.</p>
+          <div class="cluster cluster--start">
+            <Checkbox id="pay-charge-balance" v-model="payForm.charge_balance" />
+            <Label for="pay-charge-balance">从用户余额扣款</Label>
           </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closePayModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="isSaving"
-            @click="handlePay"
-          >
-            {{ isSaving ? 'Processing...' : 'Mark as Paid' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closePayModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handlePay">
+            {{ isSaving ? '处理中...' : '确认已支付' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <!-- Cancel Order Modal -->
-    <div v-if="showCancelModal" class="modal-overlay" @click.self="closeCancelModal">
-      <div class="modal modal--medium">
-        <header class="modal__header">
-          <h3>Cancel Order</h3>
-          <button class="modal__close" type="button" @click="closeCancelModal">×</button>
-        </header>
-        <div class="modal__content">
-          <p v-if="selectedOrder" class="modal-info">
-            Order #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
+    <Dialog v-model:open="showCancelModal">
+      <DialogContent class="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>取消订单</DialogTitle>
+          <DialogDescription>取消订单会记录原因，请谨慎操作。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <p v-if="selectedOrder" class="text-sm text-muted-foreground">
+            订单 #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
           </p>
-          
-          <div class="form-group">
-            <label for="cancel-reason">Cancellation Reason</label>
-            <textarea
+          <div class="stack stack--tight">
+            <Label for="cancel-reason">取消原因</Label>
+            <Textarea
               id="cancel-reason"
               v-model="cancelForm.reason"
-              class="input"
               rows="4"
-              placeholder="Optional reason for cancellation"
-            ></textarea>
-            <p class="form-help">This reason will be logged for reference.</p>
+              placeholder="可选，记录原因"
+            />
           </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeCancelModal">
-            Close
-          </button>
-          <button
-            class="button button--danger"
-            type="button"
-            :disabled="isSaving"
-            @click="handleCancel"
-          >
-            {{ isSaving ? 'Cancelling...' : 'Cancel Order' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeCancelModal">关闭</Button>
+          <Button variant="destructive" type="button" :disabled="isSaving" @click="handleCancel">
+            {{ isSaving ? '取消中...' : '确认取消' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <!-- Refund Order Modal -->
-    <div v-if="showRefundModal" class="modal-overlay" @click.self="closeRefundModal">
-      <div class="modal modal--medium">
-        <header class="modal__header">
-          <h3>Refund Order</h3>
-          <button class="modal__close" type="button" @click="closeRefundModal">×</button>
-        </header>
-        <div class="modal__content">
-          <p v-if="selectedOrder" class="modal-info">
-            Order #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
-            <br>
-            <span v-if="selectedOrder.refunded_cents" class="text-muted">
-              Already refunded: {{ formatCurrency(selectedOrder.refunded_cents, selectedOrder.currency) }}
+    <Dialog v-model:open="showRefundModal">
+      <DialogContent class="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>订单退款</DialogTitle>
+          <DialogDescription>退款金额不能超过订单可退额度。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <p v-if="selectedOrder" class="text-sm text-muted-foreground">
+            订单 #{{ selectedOrder.number }} · {{ formatCurrency(selectedOrder.total_cents, selectedOrder.currency) }}
+            <span v-if="selectedOrder.refunded_cents">
+              （已退 {{ formatCurrency(selectedOrder.refunded_cents, selectedOrder.currency) }}）
             </span>
           </p>
-          
-          <p v-if="errorMessage" class="alert alert--danger">{{ errorMessage }}</p>
-          
-          <div class="form-group">
-            <label for="refund-amount">Refund Amount (in cents) *</label>
-            <input
+
+          <Alert v-if="errorMessage" variant="destructive">
+            <AlertTitle>退款失败</AlertTitle>
+            <AlertDescription>{{ errorMessage }}</AlertDescription>
+          </Alert>
+
+          <div class="stack stack--tight">
+            <Label for="refund-amount">退款金额（分）*</Label>
+            <Input
               id="refund-amount"
               v-model.number="refundForm.amount_cents"
               type="number"
-              class="input"
               min="1"
               :max="selectedOrder ? selectedOrder.total_cents - (selectedOrder.refunded_cents || 0) : 0"
-              required
             />
-            <p v-if="selectedOrder" class="form-help">
-              Maximum refundable: {{ formatCurrency(selectedOrder.total_cents - (selectedOrder.refunded_cents || 0), selectedOrder.currency) }}
+            <p v-if="selectedOrder" class="text-xs text-muted-foreground">
+              可退上限：{{ formatCurrency(selectedOrder.total_cents - (selectedOrder.refunded_cents || 0), selectedOrder.currency) }}
             </p>
           </div>
 
-          <div class="form-group">
-            <label for="refund-reason">Reason</label>
-            <textarea
+          <div class="stack stack--tight">
+            <Label for="refund-reason">退款原因</Label>
+            <Textarea
               id="refund-reason"
               v-model="refundForm.reason"
-              class="input"
               rows="4"
-              placeholder="Optional reason for refund"
-            ></textarea>
-            <p class="form-help">This reason will be logged and may be visible to the customer.</p>
+              placeholder="可选，客户可见"
+            />
           </div>
 
-          <div class="form-group">
-            <label for="refund-operator">Operator</label>
-            <input
-              id="refund-operator"
-              v-model="refundForm.operator"
-              type="text"
-              class="input"
-              placeholder="Optional operator name"
-            />
-            <p class="form-help">Name or identifier of the person processing this refund.</p>
-          </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeRefundModal">
-            Close
-          </button>
-          <button
-            class="button button--danger"
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeRefundModal">关闭</Button>
+          <Button
+            variant="destructive"
             type="button"
             :disabled="isSaving || !refundForm.amount_cents || refundForm.amount_cents <= 0"
             @click="handleRefund"
           >
-            {{ isSaving ? 'Processing...' : 'Process Refund' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+            {{ isSaving ? '处理中...' : '确认退款' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
-<style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: white;
-  border-radius: 0.5rem;
-  width: 90%;
-  max-width: 600px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-}
-
-.modal--medium {
-  max-width: 500px;
-}
-
-.modal__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal__close {
-  font-size: 1.5rem;
-  line-height: 1;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-}
-
-.modal__close:hover {
-  background: #f3f4f6;
-}
-
-.modal__content {
-  padding: 1.5rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-
-.modal-info {
-  padding: 0.75rem;
-  background: #f9fafb;
-  border-radius: 0.375rem;
-  margin-bottom: 1rem;
-  font-weight: 500;
-  color: #374151;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: #374151;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.input,
-.select {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-
-.input:focus,
-.select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.form-help {
-  margin-top: 0.25rem;
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.button--small {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
-}
-
-.button--danger {
-  background: #dc2626;
-  color: white;
-}
-
-.button--danger:hover:not(:disabled) {
-  background: #b91c1c;
-}
-
-.button--warning {
-  background: #f59e0b;
-  color: white;
-}
-
-.button--warning:hover:not(:disabled) {
-  background: #d97706;
-}
-
-.text-muted {
-  color: #6b7280;
-  font-size: 0.875rem;
-}
-
-.alert--danger {
-  background: #fee2e2;
-  border-color: #dc2626;
-  color: #b91c1c;
-}
-</style>

@@ -6,20 +6,32 @@ import AdminDashboard from '../modules/admin/pages/AdminDashboard.vue';
 import AdminNodesPage from '../modules/admin/pages/AdminNodesPage.vue';
 import AdminOrdersPage from '../modules/admin/pages/AdminOrdersPage.vue';
 import AdminPlansPage from '../modules/admin/pages/AdminPlansPage.vue';
+import AdminProtocolsPage from '../modules/admin/pages/AdminProtocolsPage.vue';
+import AdminSubscriptionsPage from '../modules/admin/pages/AdminSubscriptionsPage.vue';
 import AdminTemplatesPage from '../modules/admin/pages/AdminTemplatesPage.vue';
 import AdminAnnouncementsPage from '../modules/admin/pages/AdminAnnouncementsPage.vue';
+import AdminAuditLogsPage from '../modules/admin/pages/AdminAuditLogsPage.vue';
+import AdminCouponsPage from '../modules/admin/pages/AdminCouponsPage.vue';
+import AdminPaymentChannelsPage from '../modules/admin/pages/AdminPaymentChannelsPage.vue';
 import AdminSecurityPage from '../modules/admin/pages/AdminSecurityPage.vue';
+import AdminSiteSettingsPage from '../modules/admin/pages/AdminSiteSettingsPage.vue';
+import AdminUsersPage from '../modules/admin/pages/AdminUsersPage.vue';
 import UserLayout from '../modules/user/pages/UserLayout.vue';
 import UserDashboard from '../modules/user/pages/UserDashboard.vue';
 import UserAnnouncementsPage from '../modules/user/pages/UserAnnouncementsPage.vue';
+import UserAccountPage from '../modules/user/pages/UserAccountPage.vue';
+import UserNodesPage from '../modules/user/pages/UserNodesPage.vue';
 import UserOrdersPage from '../modules/user/pages/UserOrdersPage.vue';
 import UserPlansPage from '../modules/user/pages/UserPlansPage.vue';
+import UserBalancePage from '../modules/user/pages/UserBalancePage.vue';
 import UserSubscriptionsPage from '../modules/user/pages/UserSubscriptionsPage.vue';
 import LoginPage from '../modules/shared/pages/LoginPage.vue';
+import RegisterPage from '../modules/shared/pages/RegisterPage.vue';
 
 const routes = [
   { path: '/', redirect: '/user' },
   { path: '/login', name: 'login', component: LoginPage },
+  { path: '/register', name: 'register', component: RegisterPage },
   {
     path: '/admin',
     meta: { role: 'admin' },
@@ -27,10 +39,21 @@ const routes = [
     children: [
       { path: '', name: 'admin', component: AdminDashboard },
       { path: 'nodes', name: 'admin-nodes', component: AdminNodesPage },
+      { path: 'protocols', name: 'admin-protocols', component: AdminProtocolsPage },
+      { path: 'users', name: 'admin-users', component: AdminUsersPage },
+      { path: 'subscriptions', name: 'admin-subscriptions', component: AdminSubscriptionsPage },
       { path: 'templates', name: 'admin-templates', component: AdminTemplatesPage },
       { path: 'plans', name: 'admin-plans', component: AdminPlansPage },
+      { path: 'coupons', name: 'admin-coupons', component: AdminCouponsPage },
       { path: 'announcements', name: 'admin-announcements', component: AdminAnnouncementsPage },
+      {
+        path: 'payment-channels',
+        name: 'admin-payment-channels',
+        component: AdminPaymentChannelsPage,
+      },
+      { path: 'site-settings', name: 'admin-site-settings', component: AdminSiteSettingsPage },
       { path: 'security', name: 'admin-security', component: AdminSecurityPage },
+      { path: 'audit-logs', name: 'admin-audit-logs', component: AdminAuditLogsPage },
       { path: 'orders', name: 'admin-orders', component: AdminOrdersPage },
     ],
   },
@@ -42,8 +65,11 @@ const routes = [
       { path: '', name: 'user', component: UserDashboard },
       { path: 'subscriptions', name: 'user-subscriptions', component: UserSubscriptionsPage },
       { path: 'plans', name: 'user-plans', component: UserPlansPage },
+      { path: 'nodes', name: 'user-nodes', component: UserNodesPage },
       { path: 'orders', name: 'user-orders', component: UserOrdersPage },
+      { path: 'balance', name: 'user-balance', component: UserBalancePage },
       { path: 'announcements', name: 'user-announcements', component: UserAnnouncementsPage },
+      { path: 'account', name: 'user-account', component: UserAccountPage },
     ],
   },
 ];
@@ -71,7 +97,7 @@ router.beforeEach(async (to) => {
   const requiredRole = to.meta.role as string | undefined;
   const refreshToken = getRefreshToken();
 
-  if (to.name === 'login') {
+  if (to.name === 'login' || to.name === 'register') {
     if (!getRole() && refreshToken) {
       try {
         await ensureSession();

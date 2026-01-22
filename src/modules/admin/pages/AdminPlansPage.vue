@@ -1,8 +1,37 @@
-<script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+﻿<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { adminApi } from '../../../api';
 import { formatBytes, formatCurrency, formatDateTime } from '../../../utils/format';
-import type { CreatePlanRequest, PaginationMeta, PlanSummary, UpdatePlanRequest } from '../../../api/types';
+import type {
+  CreatePlanRequest,
+  PaginationMeta,
+  PlanSummary,
+  ProtocolBindingSummary,
+  UpdatePlanRequest,
+} from '../../../api/types';
 
 const plans = ref<PlanSummary[]>([]);
 const loading = ref(true);
@@ -13,6 +42,10 @@ const selectedPlan = ref<PlanSummary | null>(null);
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const isSaving = ref(false);
+const protocolBindings = ref<ProtocolBindingSummary[]>([]);
+const bindingsLoading = ref(false);
+const bindingsError = ref('');
+const bindingSearch = ref('');
 
 const perPage = 10;
 const page = ref(1);
@@ -20,48 +53,198 @@ const pagination = ref<PaginationMeta | null>(null);
 
 const filters = reactive({
   q: '',
-  status: '',
+  status: '__all__' as number | string,
   visible: '',
   sort: 'updated',
   direction: 'desc',
 });
 
-const createForm = reactive<CreatePlanRequest>({
+const createForm = reactive<CreatePlanRequest & { binding_ids: number[] }>({
   name: '',
   slug: '',
   description: '',
   tags: [],
   features: [],
+  binding_ids: [],
   price_cents: 0,
   currency: 'USD',
   duration_days: 30,
   traffic_limit_bytes: 0,
   devices_limit: 1,
   sort_order: 0,
-  status: 'draft',
+  status: 1,
   visible: false,
 });
 
-const editForm = reactive<UpdatePlanRequest>({
+const editForm = reactive<UpdatePlanRequest & { binding_ids: number[] }>({
   name: '',
   slug: '',
   description: '',
   tags: [],
   features: [],
+  binding_ids: [],
   price_cents: 0,
   currency: 'USD',
   duration_days: 30,
   traffic_limit_bytes: 0,
   devices_limit: 1,
   sort_order: 0,
-  status: 'draft',
+  status: 1,
   visible: false,
 });
+
+type TrafficUnit = 'b' | 'kb' | 'mb' | 'gb' | 'tb';
+
+const trafficUnitOptions: TrafficUnit[] = ['tb', 'gb', 'mb', 'kb', 'b'];
+const trafficUnitMeta: Record<TrafficUnit, { label: string; factor: number }> = {
+  b: { label: 'B', factor: 1 },
+  kb: { label: 'KB', factor: 1024 },
+  mb: { label: 'MB', factor: 1024 ** 2 },
+  gb: { label: 'GB', factor: 1024 ** 3 },
+  tb: { label: 'TB', factor: 1024 ** 4 },
+};
 
 const tagInput = ref('');
 const featureInput = ref('');
 const editTagInput = ref('');
 const editFeatureInput = ref('');
+const createTrafficValue = ref<number | null>(0);
+const createTrafficUnit = ref<TrafficUnit>('gb');
+const editTrafficValue = ref<number | null>(0);
+const editTrafficUnit = ref<TrafficUnit>('gb');
+
+const filteredBindings = computed(() => {
+  const query = bindingSearch.value.trim().toLowerCase();
+  if (!query) {
+    return protocolBindings.value;
+  }
+  return protocolBindings.value.filter((binding) => {
+    const haystack = [
+      binding.name,
+      binding.node_name,
+      binding.protocol,
+      String(binding.id),
+      binding.node_id ? String(binding.node_id) : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+});
+
+function planStatusVariant(value?: number): 'default' | 'secondary' | 'outline' {
+  switch (value) {
+    case 2:
+      return 'default';
+    case 1:
+      return 'secondary';
+    case 3:
+      return 'outline';
+    default:
+      return 'outline';
+  }
+}
+
+function planStatusLabel(value?: number) {
+  switch (value) {
+    case 1:
+      return '草稿';
+    case 2:
+      return '已上架';
+    case 3:
+      return '已归档';
+    default:
+      return '未知';
+  }
+}
+
+function bindingStatusLabel(value?: number) {
+  switch (value) {
+    case 1:
+      return '启用';
+    case 2:
+      return '停用';
+    default:
+      return '未知';
+  }
+}
+
+function toBytes(value: number | null, unit: TrafficUnit): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value <= 0) {
+    return 0;
+  }
+  return Math.round(value * trafficUnitMeta[unit].factor);
+}
+
+function splitTrafficLimit(bytes?: number) {
+  if (!bytes || bytes <= 0) {
+    return { value: 0, unit: 'gb' as TrafficUnit };
+  }
+  const unit: TrafficUnit =
+    bytes >= trafficUnitMeta.tb.factor
+      ? 'tb'
+      : bytes >= trafficUnitMeta.gb.factor
+        ? 'gb'
+        : bytes >= trafficUnitMeta.mb.factor
+          ? 'mb'
+          : bytes >= trafficUnitMeta.kb.factor
+            ? 'kb'
+            : 'b';
+  const value = Number((bytes / trafficUnitMeta[unit].factor).toFixed(2));
+  return { value, unit };
+}
+
+function bindingLabel(bindingId: number) {
+  const binding = protocolBindings.value.find((item) => item.id === bindingId);
+  if (!binding) {
+    return `绑定 #${bindingId}`;
+  }
+  const nodeLabel = binding.node_name || (binding.node_id ? `节点 ${binding.node_id}` : '未知节点');
+  const protocolLabel = binding.protocol || '未知协议';
+  return `${protocolLabel} · ${nodeLabel}`;
+}
+
+function toggleBinding(list: number[], bindingId: number, checked: boolean | 'indeterminate') {
+  const isChecked = checked === true;
+  if (isChecked && !list.includes(bindingId)) {
+    list.push(bindingId);
+    return;
+  }
+  if (!isChecked && list.includes(bindingId)) {
+    const index = list.indexOf(bindingId);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+  }
+}
+
+function removeBinding(list: number[], bindingId: number) {
+  const index = list.indexOf(bindingId);
+  if (index >= 0) {
+    list.splice(index, 1);
+  }
+}
+
+async function loadProtocolBindings() {
+  bindingsLoading.value = true;
+  bindingsError.value = '';
+
+  try {
+    const response = await adminApi.fetchAdminProtocolBindings({
+      page: 1,
+      per_page: 200,
+    });
+    protocolBindings.value = response.bindings ?? [];
+  } catch (error) {
+    bindingsError.value = error instanceof Error ? error.message : '加载协议绑定失败';
+  } finally {
+    bindingsLoading.value = false;
+  }
+}
 
 async function loadPlans() {
   loading.value = true;
@@ -72,8 +255,11 @@ async function loadPlans() {
       page: 1,
       per_page: perPage,
       q: filters.q || undefined,
-      status: filters.status || undefined,
-      visible: filters.visible ? filters.visible === 'true' : undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      visible:
+        filters.visible && filters.visible !== '__all__'
+          ? filters.visible === 'true'
+          : undefined,
       sort: filters.sort,
       direction: filters.direction,
     });
@@ -81,7 +267,7 @@ async function loadPlans() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? 1;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load plans';
+    errorMessage.value = error instanceof Error ? error.message : '加载套餐失败';
   } finally {
     loading.value = false;
   }
@@ -102,8 +288,11 @@ async function loadMore() {
       page: targetPage,
       per_page: perPage,
       q: filters.q || undefined,
-      status: filters.status || undefined,
-      visible: filters.visible ? filters.visible === 'true' : undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      visible:
+        filters.visible && filters.visible !== '__all__'
+          ? filters.visible === 'true'
+          : undefined,
       sort: filters.sort,
       direction: filters.direction,
     });
@@ -111,7 +300,7 @@ async function loadMore() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load more plans';
+    errorMessage.value = error instanceof Error ? error.message : '加载更多套餐失败';
   } finally {
     isLoadingMore.value = false;
   }
@@ -127,16 +316,23 @@ function openCreateModal() {
   createForm.description = '';
   createForm.tags = [];
   createForm.features = [];
+  createForm.binding_ids = [];
   createForm.price_cents = 0;
   createForm.currency = 'USD';
   createForm.duration_days = 30;
   createForm.traffic_limit_bytes = 0;
+  createTrafficValue.value = 0;
+  createTrafficUnit.value = 'gb';
   createForm.devices_limit = 1;
   createForm.sort_order = 0;
-  createForm.status = 'draft';
+  createForm.status = 1;
   createForm.visible = false;
   tagInput.value = '';
   featureInput.value = '';
+  bindingSearch.value = '';
+  if (!protocolBindings.value.length) {
+    void loadProtocolBindings();
+  }
   showCreateModal.value = true;
 }
 
@@ -146,7 +342,7 @@ function closeCreateModal() {
 
 async function handleCreate() {
   if (!createForm.name || createForm.price_cents <= 0 || createForm.duration_days <= 0) {
-    errorMessage.value = 'Please fill in all required fields with valid values';
+    errorMessage.value = '请填写必填项并确认数值有效';
     return;
   }
 
@@ -154,11 +350,15 @@ async function handleCreate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.createAdminPlan(createForm);
+    const payload: CreatePlanRequest = {
+      ...createForm,
+      traffic_limit_bytes: toBytes(createTrafficValue.value, createTrafficUnit.value),
+    };
+    await adminApi.createAdminPlan(payload);
     closeCreateModal();
     await loadPlans();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to create plan';
+    errorMessage.value = error instanceof Error ? error.message : '创建套餐失败';
   } finally {
     isSaving.value = false;
   }
@@ -171,16 +371,24 @@ function openEditModal(plan: PlanSummary) {
   editForm.description = plan.description || '';
   editForm.tags = plan.tags ? [...plan.tags] : [];
   editForm.features = plan.features ? [...plan.features] : [];
+  editForm.binding_ids = plan.binding_ids ? [...plan.binding_ids] : [];
   editForm.price_cents = plan.price_cents;
   editForm.currency = plan.currency;
   editForm.duration_days = plan.duration_days;
   editForm.traffic_limit_bytes = plan.traffic_limit_bytes || 0;
+  const trafficLimit = splitTrafficLimit(plan.traffic_limit_bytes);
+  editTrafficValue.value = trafficLimit.value;
+  editTrafficUnit.value = trafficLimit.unit;
   editForm.devices_limit = plan.devices_limit || 1;
   editForm.sort_order = plan.sort_order || 0;
-  editForm.status = plan.status || 'draft';
+  editForm.status = plan.status ?? 1;
   editForm.visible = plan.visible || false;
   editTagInput.value = '';
   editFeatureInput.value = '';
+  bindingSearch.value = '';
+  if (!protocolBindings.value.length) {
+    void loadProtocolBindings();
+  }
   showEditModal.value = true;
 }
 
@@ -193,12 +401,12 @@ async function handleUpdate() {
   if (!selectedPlan.value) return;
 
   if (editForm.price_cents && editForm.price_cents <= 0) {
-    errorMessage.value = 'Price must be greater than 0';
+    errorMessage.value = '价格必须大于 0';
     return;
   }
 
   if (editForm.duration_days && editForm.duration_days <= 0) {
-    errorMessage.value = 'Duration must be greater than 0';
+    errorMessage.value = '时长必须大于 0';
     return;
   }
 
@@ -206,11 +414,15 @@ async function handleUpdate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.updateAdminPlan(selectedPlan.value.id, editForm);
+    const payload: UpdatePlanRequest = {
+      ...editForm,
+      traffic_limit_bytes: toBytes(editTrafficValue.value, editTrafficUnit.value),
+    };
+    await adminApi.updateAdminPlan(selectedPlan.value.id, payload);
     closeEditModal();
     await loadPlans();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to update plan';
+    errorMessage.value = error instanceof Error ? error.message : '更新套餐失败';
   } finally {
     isSaving.value = false;
   }
@@ -274,6 +486,7 @@ function removeEditFeature(feature: string) {
 
 onMounted(() => {
   void loadPlans();
+  void loadProtocolBindings();
 });
 </script>
 
@@ -281,718 +494,646 @@ onMounted(() => {
   <div class="page-section">
     <header class="page-section__header">
       <div>
-        <p class="page__eyebrow">Plans</p>
-        <h3 class="page-section__title">Plan catalog</h3>
-        <p class="page__subtitle">Review pricing, limits, and visibility.</p>
+        <p class="page__eyebrow">套餐</p>
+        <h3 class="page-section__title">套餐目录</h3>
+        <p class="page__subtitle">管理价格、流量与可见性。</p>
       </div>
       <div class="page-section__actions">
-        <button class="button button--primary" type="button" @click="openCreateModal">
-          Create Plan
-        </button>
-        <button class="button button--ghost" type="button" @click="loadPlans" :disabled="loading">
-          {{ loading ? 'Refreshing...' : 'Refresh' }}
-        </button>
+        <Button type="button" @click="openCreateModal">新建套餐</Button>
+        <Button variant="secondary" type="button" @click="loadPlans" :disabled="loading">
+          {{ loading ? '刷新中...' : '刷新列表' }}
+        </Button>
       </div>
     </header>
 
-    <form class="filter-bar" @submit.prevent="loadPlans">
-      <label class="form__field form__field--compact">
-        <span>Search</span>
-        <input v-model="filters.q" type="search" placeholder="Plan name" />
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Status</span>
-        <select v-model="filters.status">
-          <option value="">All</option>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Visible</span>
-        <select v-model="filters.visible">
-          <option value="">All</option>
-          <option value="true">Visible</option>
-          <option value="false">Hidden</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Sort</span>
-        <select v-model="filters.sort">
-          <option value="updated">Updated</option>
-          <option value="price">Price</option>
-          <option value="name">Name</option>
-        </select>
-      </label>
-      <label class="form__field form__field--compact">
-        <span>Direction</span>
-        <select v-model="filters.direction">
-          <option value="desc">Descending</option>
-          <option value="asc">Ascending</option>
-        </select>
-      </label>
-      <button class="button" type="submit" :disabled="loading">Apply</button>
+    <form class="form-grid form-grid--wide" @submit.prevent="loadPlans">
+      <div class="stack stack--tight grid-span-2">
+        <Label>搜索</Label>
+        <Input v-model="filters.q" type="search" placeholder="套餐名称" />
+      </div>
+      <div class="stack stack--tight">
+        <Label>状态</Label>
+        <Select v-model="filters.status">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem :value="1">草稿</SelectItem>
+            <SelectItem :value="2">已上架</SelectItem>
+            <SelectItem :value="3">已归档</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>可见性</Label>
+        <Select v-model="filters.visible">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem value="true">可见</SelectItem>
+            <SelectItem value="false">隐藏</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>排序</Label>
+        <Select v-model="filters.sort">
+          <SelectTrigger>
+            <SelectValue placeholder="请选择" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updated">最近更新</SelectItem>
+            <SelectItem value="price">价格</SelectItem>
+            <SelectItem value="name">名称</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="stack stack--tight">
+        <Label>方向</Label>
+        <Select v-model="filters.direction">
+          <SelectTrigger>
+            <SelectValue placeholder="请选择" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="desc">降序</SelectItem>
+            <SelectItem value="asc">升序</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="cluster cluster--end">
+        <Button type="submit" :disabled="loading">应用筛选</Button>
+      </div>
     </form>
 
-    <p v-if="errorMessage" class="alert">{{ errorMessage }}</p>
+    <Alert v-if="errorMessage" variant="destructive">
+      <AlertTitle>操作失败</AlertTitle>
+      <AlertDescription>{{ errorMessage }}</AlertDescription>
+    </Alert>
 
     <div class="split-grid">
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Plans</h3>
-            <p class="panel-card__meta">Latest {{ plans.length }} plans</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>套餐列表</CardTitle>
+          <p class="panel-card__meta">共 {{ plans.length }} 个套餐</p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="loading" class="panel-card__empty">正在加载套餐...</p>
+          <p v-else-if="plans.length === 0" class="panel-card__empty">暂无套餐。</p>
+          <ul v-else class="data-list">
+            <li
+              v-for="plan in plans"
+              :key="plan.id"
+              :class="['data-row', 'data-row--stack', { 'data-row--selected': selectedPlan?.id === plan.id }]"
+            >
+              <div>
+                <p class="data-row__title">{{ plan.name }}</p>
+                <p class="data-row__meta">
+                  {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} 天
+                </p>
+                <p class="data-row__meta">流量 {{ formatBytes(plan.traffic_limit_bytes) }}</p>
+              </div>
+              <div class="data-row__aside">
+                <Badge :variant="planStatusVariant(plan.status)">{{ planStatusLabel(plan.status) }}</Badge>
+                <Badge variant="outline">{{ plan.visible ? '可见' : '隐藏' }}</Badge>
+                <Button size="sm" type="button" @click="openEditModal(plan)">编辑</Button>
+                <Button variant="ghost" size="sm" type="button" @click="selectPlan(plan)">详情</Button>
+              </div>
+            </li>
+          </ul>
+          <div v-if="pagination?.has_next" class="list-footer">
+            <Button variant="ghost" type="button" @click="loadMore" :disabled="isLoadingMore">
+              {{ isLoadingMore ? '加载中...' : '加载更多' }}
+            </Button>
           </div>
-        </header>
-        <div v-if="loading" class="panel-card__empty">Loading plans...</div>
-        <div v-else-if="plans.length === 0" class="panel-card__empty">No plans found.</div>
-        <ul v-else class="data-list">
-          <li
-            v-for="plan in plans"
-            :key="plan.id"
-            :class="['data-row', 'data-row--stack', { 'data-row--selected': selectedPlan?.id === plan.id }]"
-          >
-            <div>
-              <p class="data-row__title">{{ plan.name }}</p>
-              <p class="data-row__meta">
-                {{ formatCurrency(plan.price_cents, plan.currency) }} · {{ plan.duration_days }} days
-              </p>
-              <p class="data-row__meta">Traffic {{ formatBytes(plan.traffic_limit_bytes) }}</p>
-            </div>
-            <div class="data-row__aside">
-              <span class="tag">{{ plan.status || 'draft' }}</span>
-              <span class="data-row__meta">{{ plan.visible ? 'Visible' : 'Hidden' }}</span>
-              <button class="button button--small" type="button" @click="openEditModal(plan)">
-                Edit
-              </button>
-              <button class="button button--ghost button--small" type="button" @click="selectPlan(plan)">
-                Details
-              </button>
-            </div>
-          </li>
-        </ul>
-        <div v-if="pagination?.has_next" class="list-footer">
-          <button class="button button--ghost" type="button" @click="loadMore" :disabled="isLoadingMore">
-            {{ isLoadingMore ? 'Loading...' : 'Load more' }}
-          </button>
-        </div>
-      </article>
+        </CardContent>
+      </Card>
 
-      <article class="panel-card">
-        <header class="panel-card__header">
-          <div>
-            <h3>Plan detail</h3>
-            <p class="panel-card__meta">
-              {{ selectedPlan ? selectedPlan.name : 'Select a plan' }}
-            </p>
+      <Card>
+        <CardHeader>
+          <CardTitle>套餐详情</CardTitle>
+          <p class="panel-card__meta">
+            {{ selectedPlan ? selectedPlan.name : '请选择套餐' }}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <p v-if="!selectedPlan" class="panel-card__empty">请先选择套餐查看详情。</p>
+          <div v-else>
+            <div class="detail-grid">
+              <div>
+                <p class="detail-label">价格</p>
+                <p class="detail-value">
+                  {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
+                </p>
+              </div>
+              <div>
+                <p class="detail-label">时长</p>
+                <p class="detail-value">{{ selectedPlan.duration_days }} 天</p>
+              </div>
+              <div>
+                <p class="detail-label">设备数</p>
+                <p class="detail-value">{{ selectedPlan.devices_limit ?? '-' }}</p>
+              </div>
+              <div>
+                <p class="detail-label">流量上限</p>
+                <p class="detail-value">{{ formatBytes(selectedPlan.traffic_limit_bytes) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">状态</p>
+                <p class="detail-value">{{ planStatusLabel(selectedPlan.status) }}</p>
+              </div>
+              <div>
+                <p class="detail-label">更新时间</p>
+                <p class="detail-value">{{ formatDateTime(selectedPlan.updated_at) }}</p>
+              </div>
+            </div>
+            <p class="detail-label">描述</p>
+            <p class="detail-value">{{ selectedPlan.description || '暂无描述。' }}</p>
+            <div v-if="selectedPlan.tags?.length" class="detail-section">
+              <h4>标签</h4>
+              <div class="cluster">
+                <Badge v-for="tag in selectedPlan.tags" :key="tag" variant="secondary">{{ tag }}</Badge>
+              </div>
+            </div>
+            <div v-if="selectedPlan.features?.length" class="detail-section">
+              <h4>权益</h4>
+              <ul class="data-list data-list--compact">
+                <li v-for="feature in selectedPlan.features" :key="feature" class="data-row">
+                  <span class="data-row__title">{{ feature }}</span>
+                </li>
+              </ul>
+            </div>
+            <div v-if="selectedPlan.binding_ids?.length" class="detail-section">
+              <h4>协议绑定</h4>
+              <div class="cluster">
+                <Badge v-for="bindingId in selectedPlan.binding_ids" :key="bindingId" variant="outline">
+                  {{ bindingLabel(bindingId) }}
+                </Badge>
+              </div>
+            </div>
           </div>
-        </header>
-        <div v-if="!selectedPlan" class="panel-card__empty">Choose a plan to view details.</div>
-        <div v-else>
-          <div class="detail-grid">
-            <div>
-              <p class="detail-label">Price</p>
-              <p class="detail-value">
-                {{ formatCurrency(selectedPlan.price_cents, selectedPlan.currency) }}
-              </p>
-            </div>
-            <div>
-              <p class="detail-label">Duration</p>
-              <p class="detail-value">{{ selectedPlan.duration_days }} days</p>
-            </div>
-            <div>
-              <p class="detail-label">Devices</p>
-              <p class="detail-value">{{ selectedPlan.devices_limit ?? '-' }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Traffic limit</p>
-              <p class="detail-value">{{ formatBytes(selectedPlan.traffic_limit_bytes) }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Status</p>
-              <p class="detail-value">{{ selectedPlan.status || 'draft' }}</p>
-            </div>
-            <div>
-              <p class="detail-label">Updated</p>
-              <p class="detail-value">{{ formatDateTime(selectedPlan.updated_at) }}</p>
-            </div>
-          </div>
-          <p class="detail-label">Description</p>
-          <p class="detail-value">{{ selectedPlan.description || 'No description.' }}</p>
-          <div v-if="selectedPlan.tags?.length" class="detail-section">
-            <h4>Tags</h4>
-            <div class="tag-list">
-              <span v-for="tag in selectedPlan.tags" :key="tag" class="tag">{{ tag }}</span>
-            </div>
-          </div>
-          <div v-if="selectedPlan.features?.length" class="detail-section">
-            <h4>Features</h4>
-            <ul class="data-list data-list--compact">
-              <li v-for="feature in selectedPlan.features" :key="feature" class="data-row">
-                <span class="data-row__title">{{ feature }}</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </article>
+        </CardContent>
+      </Card>
     </div>
 
-    <!-- Create Plan Modal -->
-    <div v-if="showCreateModal" class="modal-overlay" @click.self="closeCreateModal">
-      <div class="modal modal--large">
-        <header class="modal__header">
-          <h3>Create Plan</h3>
-          <button class="modal__close" type="button" @click="closeCreateModal">×</button>
-        </header>
-        <div class="modal__content">
+    <Dialog v-model:open="showCreateModal">
+      <DialogContent class="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>新建套餐</DialogTitle>
+          <DialogDescription>请填写套餐价格、时长与流量限制。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
           <div class="form-grid">
-            <div class="form-group">
-              <label for="create-name">Name *</label>
-              <input
-                id="create-name"
-                v-model="createForm.name"
-                type="text"
-                class="input"
-                placeholder="Plan name"
-              />
+            <div class="stack stack--tight">
+              <Label for="create-name">套餐名称 *</Label>
+              <Input id="create-name" v-model="createForm.name" type="text" placeholder="例如 高速月卡" />
             </div>
-            <div class="form-group">
-              <label for="create-slug">Slug</label>
-              <input
-                id="create-slug"
-                v-model="createForm.slug"
-                type="text"
-                class="input"
-                placeholder="plan-slug"
-              />
+            <div class="stack stack--tight">
+              <Label for="create-slug">别名</Label>
+              <Input id="create-slug" v-model="createForm.slug" type="text" placeholder="plan-slug" />
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="create-description">Description</label>
-            <textarea
+          <div class="stack stack--tight">
+            <Label for="create-description">描述</Label>
+            <Textarea
               id="create-description"
               v-model="createForm.description"
-              class="input"
               rows="2"
-              placeholder="Plan description"
-            ></textarea>
+              placeholder="套餐说明与适用人群"
+            />
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="create-price">Price (cents) *</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="create-price">价格（分）*</Label>
+              <Input
                 id="create-price"
                 v-model.number="createForm.price_cents"
                 type="number"
                 min="0"
-                class="input"
                 placeholder="999"
               />
             </div>
-            <div class="form-group">
-              <label for="create-currency">Currency *</label>
-              <select id="create-currency" v-model="createForm.currency" class="select">
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="CNY">CNY</option>
-              </select>
+            <div class="stack stack--tight">
+              <Label>币种 *</Label>
+              <Select v-model="createForm.currency">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="EUR">EUR</SelectItem>
+                  <SelectItem value="CNY">CNY</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="create-duration">Duration (days) *</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="create-duration">时长（天）*</Label>
+              <Input
                 id="create-duration"
                 v-model.number="createForm.duration_days"
                 type="number"
                 min="1"
-                class="input"
                 placeholder="30"
               />
             </div>
-            <div class="form-group">
-              <label for="create-traffic">Traffic Limit (bytes)</label>
-              <input
-                id="create-traffic"
-                v-model.number="createForm.traffic_limit_bytes"
-                type="number"
-                min="0"
-                class="input"
-                placeholder="107374182400"
-              />
+            <div class="stack stack--tight">
+              <Label for="create-traffic">流量上限</Label>
+              <div class="traffic-input">
+                <Input
+                  id="create-traffic"
+                  v-model.number="createTrafficValue"
+                  type="number"
+                  min="0"
+                  placeholder="100"
+                  class="traffic-input__value"
+                />
+                <Select v-model="createTrafficUnit">
+                  <SelectTrigger class="traffic-input__unit">
+                    <SelectValue placeholder="单位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="unit in trafficUnitOptions" :key="unit" :value="unit">
+                      {{ trafficUnitMeta[unit].label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="create-devices">Devices Limit</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="create-devices">设备数限制</Label>
+              <Input
                 id="create-devices"
                 v-model.number="createForm.devices_limit"
                 type="number"
                 min="1"
-                class="input"
                 placeholder="1"
               />
             </div>
-            <div class="form-group">
-              <label for="create-sort">Sort Order</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="create-sort">排序权重</Label>
+              <Input
                 id="create-sort"
                 v-model.number="createForm.sort_order"
                 type="number"
-                class="input"
                 placeholder="0"
               />
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="create-status">Status</label>
-              <select id="create-status" v-model="createForm.status" class="select">
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-              </select>
+            <div class="stack stack--tight">
+              <Label>状态</Label>
+              <Select v-model="createForm.status">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="1">草稿</SelectItem>
+                  <SelectItem :value="2">已上架</SelectItem>
+                  <SelectItem :value="3">已归档</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input v-model="createForm.visible" type="checkbox" />
-                <span>Visible to users</span>
-              </label>
+            <div class="cluster cluster--center form__field--offset">
+              <Checkbox id="create-visible" v-model="createForm.visible" />
+              <Label for="create-visible">对用户可见</Label>
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Tags</label>
-            <div class="tag-input-group">
-              <input
+          <div class="stack stack--tight">
+            <Label>标签</Label>
+            <div class="cluster">
+              <Input
                 v-model="tagInput"
                 type="text"
-                class="input"
-                placeholder="Add tag and press Enter"
-                @keyup.enter="addTag"
+                placeholder="输入标签后回车"
+                @keyup.enter.prevent="addTag"
               />
-              <button class="button button--small" type="button" @click="addTag">Add</button>
+              <Button variant="secondary" type="button" @click="addTag">添加</Button>
             </div>
-            <div v-if="createForm.tags && createForm.tags.length > 0" class="tag-list">
-              <span v-for="tag in createForm.tags" :key="tag" class="tag tag--removable">
+            <div v-if="createForm.tags && createForm.tags.length" class="cluster">
+              <Badge v-for="tag in createForm.tags" :key="tag" variant="secondary" class="inline-gap">
                 {{ tag }}
-                <button type="button" @click="removeTag(tag)">×</button>
-              </span>
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeTag(tag)">×</Button>
+              </Badge>
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Features</label>
-            <div class="tag-input-group">
-              <input
+          <div class="stack stack--tight">
+            <Label>权益</Label>
+            <div class="cluster">
+              <Input
                 v-model="featureInput"
                 type="text"
-                class="input"
-                placeholder="Add feature and press Enter"
-                @keyup.enter="addFeature"
+                placeholder="输入权益后回车"
+                @keyup.enter.prevent="addFeature"
               />
-              <button class="button button--small" type="button" @click="addFeature">Add</button>
+              <Button variant="secondary" type="button" @click="addFeature">添加</Button>
             </div>
-            <ul v-if="createForm.features && createForm.features.length > 0" class="feature-list">
-              <li v-for="feature in createForm.features" :key="feature" class="feature-item">
+            <div v-if="createForm.features && createForm.features.length" class="cluster">
+              <Badge
+                v-for="feature in createForm.features"
+                :key="feature"
+                variant="outline"
+                class="inline-gap"
+              >
                 {{ feature }}
-                <button type="button" @click="removeFeature(feature)">×</button>
-              </li>
-            </ul>
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeFeature(feature)">×</Button>
+              </Badge>
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label>协议绑定</Label>
+            <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
+            <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
+            <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
+            <p v-else-if="filteredBindings.length === 0" class="panel-card__empty">暂无可用绑定。</p>
+            <div v-else class="data-list data-list--compact">
+              <div v-for="binding in filteredBindings" :key="binding.id" class="data-row data-row--stack">
+                <div class="cluster cluster--center">
+                  <Checkbox
+                    :checked="createForm.binding_ids.includes(binding.id)"
+                    @update:checked="(checked) => toggleBinding(createForm.binding_ids, binding.id, checked)"
+                  />
+                  <div>
+                    <p class="data-row__title">{{ binding.name || binding.protocol || '未命名绑定' }}</p>
+                    <p class="data-row__meta">
+                      节点 {{ binding.node_name || binding.node_id || '-' }} ·
+                      {{ binding.protocol || '未知协议' }} ·
+                      ID {{ binding.id }}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline">{{ bindingStatusLabel(binding.status) }}</Badge>
+              </div>
+            </div>
+            <div v-if="createForm.binding_ids.length" class="cluster">
+              <Badge
+                v-for="bindingId in createForm.binding_ids"
+                :key="bindingId"
+                variant="secondary"
+                class="inline-gap"
+              >
+                {{ bindingLabel(bindingId) }}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  @click="removeBinding(createForm.binding_ids, bindingId)"
+                >
+                  ×
+                </Button>
+              </Badge>
+            </div>
           </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeCreateModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="isSaving"
-            @click="handleCreate"
-          >
-            {{ isSaving ? 'Creating...' : 'Create' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeCreateModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleCreate">
+            {{ isSaving ? '创建中...' : '创建套餐' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <!-- Edit Plan Modal -->
-    <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
-      <div class="modal modal--large">
-        <header class="modal__header">
-          <h3>Edit Plan</h3>
-          <button class="modal__close" type="button" @click="closeEditModal">×</button>
-        </header>
-        <div class="modal__content">
+    <Dialog v-model:open="showEditModal">
+      <DialogContent class="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>编辑套餐</DialogTitle>
+          <DialogDescription>更新套餐定价与能力配置。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
           <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-name">Name</label>
-              <input
-                id="edit-name"
-                v-model="editForm.name"
-                type="text"
-                class="input"
-                placeholder="Plan name"
-              />
+            <div class="stack stack--tight">
+              <Label for="edit-name">套餐名称</Label>
+              <Input id="edit-name" v-model="editForm.name" type="text" placeholder="套餐名称" />
             </div>
-            <div class="form-group">
-              <label for="edit-slug">Slug</label>
-              <input
-                id="edit-slug"
-                v-model="editForm.slug"
-                type="text"
-                class="input"
-                placeholder="plan-slug"
-              />
+            <div class="stack stack--tight">
+              <Label for="edit-slug">别名</Label>
+              <Input id="edit-slug" v-model="editForm.slug" type="text" placeholder="plan-slug" />
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="edit-description">Description</label>
-            <textarea
+          <div class="stack stack--tight">
+            <Label for="edit-description">描述</Label>
+            <Textarea
               id="edit-description"
               v-model="editForm.description"
-              class="input"
               rows="2"
-              placeholder="Plan description"
-            ></textarea>
+              placeholder="套餐说明"
+            />
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-price">Price (cents)</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="edit-price">价格（分）</Label>
+              <Input
                 id="edit-price"
                 v-model.number="editForm.price_cents"
                 type="number"
                 min="0"
-                class="input"
                 placeholder="999"
               />
             </div>
-            <div class="form-group">
-              <label for="edit-currency">Currency</label>
-              <select id="edit-currency" v-model="editForm.currency" class="select">
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="CNY">CNY</option>
-              </select>
+            <div class="stack stack--tight">
+              <Label>币种</Label>
+              <Select v-model="editForm.currency">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="EUR">EUR</SelectItem>
+                  <SelectItem value="CNY">CNY</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-duration">Duration (days)</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="edit-duration">时长（天）</Label>
+              <Input
                 id="edit-duration"
                 v-model.number="editForm.duration_days"
                 type="number"
                 min="1"
-                class="input"
                 placeholder="30"
               />
             </div>
-            <div class="form-group">
-              <label for="edit-traffic">Traffic Limit (bytes)</label>
-              <input
-                id="edit-traffic"
-                v-model.number="editForm.traffic_limit_bytes"
-                type="number"
-                min="0"
-                class="input"
-                placeholder="107374182400"
-              />
+            <div class="stack stack--tight">
+              <Label for="edit-traffic">流量上限</Label>
+              <div class="traffic-input">
+                <Input
+                  id="edit-traffic"
+                  v-model.number="editTrafficValue"
+                  type="number"
+                  min="0"
+                  placeholder="100"
+                  class="traffic-input__value"
+                />
+                <Select v-model="editTrafficUnit">
+                  <SelectTrigger class="traffic-input__unit">
+                    <SelectValue placeholder="单位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="unit in trafficUnitOptions" :key="unit" :value="unit">
+                      {{ trafficUnitMeta[unit].label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-devices">Devices Limit</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="edit-devices">设备数限制</Label>
+              <Input
                 id="edit-devices"
                 v-model.number="editForm.devices_limit"
                 type="number"
                 min="1"
-                class="input"
                 placeholder="1"
               />
             </div>
-            <div class="form-group">
-              <label for="edit-sort">Sort Order</label>
-              <input
+            <div class="stack stack--tight">
+              <Label for="edit-sort">排序权重</Label>
+              <Input
                 id="edit-sort"
                 v-model.number="editForm.sort_order"
                 type="number"
-                class="input"
                 placeholder="0"
               />
             </div>
           </div>
 
           <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-status">Status</label>
-              <select id="edit-status" v-model="editForm.status" class="select">
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-              </select>
+            <div class="stack stack--tight">
+              <Label>状态</Label>
+              <Select v-model="editForm.status">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="1">草稿</SelectItem>
+                  <SelectItem :value="2">已上架</SelectItem>
+                  <SelectItem :value="3">已归档</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input v-model="editForm.visible" type="checkbox" />
-                <span>Visible to users</span>
-              </label>
+            <div class="cluster cluster--center form__field--offset">
+              <Checkbox id="edit-visible" v-model="editForm.visible" />
+              <Label for="edit-visible">对用户可见</Label>
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Tags</label>
-            <div class="tag-input-group">
-              <input
+          <div class="stack stack--tight">
+            <Label>标签</Label>
+            <div class="cluster">
+              <Input
                 v-model="editTagInput"
                 type="text"
-                class="input"
-                placeholder="Add tag and press Enter"
-                @keyup.enter="addEditTag"
+                placeholder="输入标签后回车"
+                @keyup.enter.prevent="addEditTag"
               />
-              <button class="button button--small" type="button" @click="addEditTag">Add</button>
+              <Button variant="secondary" type="button" @click="addEditTag">添加</Button>
             </div>
-            <div v-if="editForm.tags && editForm.tags.length > 0" class="tag-list">
-              <span v-for="tag in editForm.tags" :key="tag" class="tag tag--removable">
+            <div v-if="editForm.tags && editForm.tags.length" class="cluster">
+              <Badge v-for="tag in editForm.tags" :key="tag" variant="secondary" class="inline-gap">
                 {{ tag }}
-                <button type="button" @click="removeEditTag(tag)">×</button>
-              </span>
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeEditTag(tag)">×</Button>
+              </Badge>
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Features</label>
-            <div class="tag-input-group">
-              <input
+          <div class="stack stack--tight">
+            <Label>权益</Label>
+            <div class="cluster">
+              <Input
                 v-model="editFeatureInput"
                 type="text"
-                class="input"
-                placeholder="Add feature and press Enter"
-                @keyup.enter="addEditFeature"
+                placeholder="输入权益后回车"
+                @keyup.enter.prevent="addEditFeature"
               />
-              <button class="button button--small" type="button" @click="addEditFeature">Add</button>
+              <Button variant="secondary" type="button" @click="addEditFeature">添加</Button>
             </div>
-            <ul v-if="editForm.features && editForm.features.length > 0" class="feature-list">
-              <li v-for="feature in editForm.features" :key="feature" class="feature-item">
+            <div v-if="editForm.features && editForm.features.length" class="cluster">
+              <Badge
+                v-for="feature in editForm.features"
+                :key="feature"
+                variant="outline"
+                class="inline-gap"
+              >
                 {{ feature }}
-                <button type="button" @click="removeEditFeature(feature)">×</button>
-              </li>
-            </ul>
+                <Button variant="ghost" size="icon-sm" type="button" @click="removeEditFeature(feature)">×</Button>
+              </Badge>
+            </div>
+          </div>
+
+          <div class="stack stack--tight">
+            <Label>协议绑定</Label>
+            <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
+            <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
+            <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
+            <p v-else-if="filteredBindings.length === 0" class="panel-card__empty">暂无可用绑定。</p>
+            <div v-else class="data-list data-list--compact">
+              <div v-for="binding in filteredBindings" :key="binding.id" class="data-row data-row--stack">
+                <div class="cluster cluster--center">
+                  <Checkbox
+                    :checked="editForm.binding_ids.includes(binding.id)"
+                    @update:checked="(checked) => toggleBinding(editForm.binding_ids, binding.id, checked)"
+                  />
+                  <div>
+                    <p class="data-row__title">{{ binding.name || binding.protocol || '未命名绑定' }}</p>
+                    <p class="data-row__meta">
+                      节点 {{ binding.node_name || binding.node_id || '-' }} ·
+                      {{ binding.protocol || '未知协议' }} ·
+                      ID {{ binding.id }}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline">{{ bindingStatusLabel(binding.status) }}</Badge>
+              </div>
+            </div>
+            <div v-if="editForm.binding_ids.length" class="cluster">
+              <Badge
+                v-for="bindingId in editForm.binding_ids"
+                :key="bindingId"
+                variant="secondary"
+                class="inline-gap"
+              >
+                {{ bindingLabel(bindingId) }}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  @click="removeBinding(editForm.binding_ids, bindingId)"
+                >
+                  ×
+                </Button>
+              </Badge>
+            </div>
           </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeEditModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="isSaving"
-            @click="handleUpdate"
-          >
-            {{ isSaving ? 'Updating...' : 'Update' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeEditModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleUpdate">
+            {{ isSaving ? '更新中...' : '保存修改' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
-
-<style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: white;
-  border-radius: 0.5rem;
-  width: 90%;
-  max-width: 800px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-}
-
-.modal--large {
-  max-width: 900px;
-}
-
-.modal__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal__close {
-  font-size: 1.5rem;
-  line-height: 1;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-}
-
-.modal__close:hover {
-  background: #f3f4f6;
-}
-
-.modal__content {
-  padding: 1.5rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: #374151;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.input,
-.select {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-
-.input:focus,
-.select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  padding-top: 1.75rem;
-}
-
-.tag-input-group {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.tag--removable {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.tag--removable button {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  width: 1rem;
-  height: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.tag--removable button:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.feature-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0 0;
-}
-
-.feature-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem;
-  background: #f9fafb;
-  border-radius: 0.25rem;
-  margin-bottom: 0.5rem;
-}
-
-.feature-item button {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  width: 1.5rem;
-  height: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.feature-item button:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.button--small {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-}
-</style>

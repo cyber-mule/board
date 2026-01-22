@@ -1,14 +1,29 @@
+const accessTokenKey = 'znp_access_token';
 const refreshTokenKey = 'znp_refresh_token';
 const roleKey = 'znp_role';
 
 let accessToken: string | null = null;
 
 export function getAccessToken(): string | null {
+  if (accessToken) {
+    return accessToken;
+  }
+
+  const storedToken = window.localStorage.getItem(accessTokenKey);
+  if (storedToken) {
+    accessToken = storedToken;
+  }
+
   return accessToken;
 }
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  if (token) {
+    window.localStorage.setItem(accessTokenKey, token);
+  } else {
+    window.localStorage.removeItem(accessTokenKey);
+  }
 }
 
 export function getRefreshToken(): string | null {

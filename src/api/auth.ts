@@ -1,12 +1,22 @@
 import { buildUrl } from './url';
 import { authPath } from './paths';
+import { parseErrorResponse } from './error';
 import {
   getRefreshToken,
   setAccessToken,
   setRefreshToken,
   setRole,
 } from '../auth/tokens';
-import type { AuthenticatedUser } from './types';
+import { USE_MOCK, mockFetch } from '../mock';
+import { pushToast } from '../lib/toast';
+import type {
+  AuthenticatedUser,
+  ForgotPasswordRequest,
+  MessageResponse,
+  RegisterRequest,
+  ResetPasswordRequest,
+  VerifyRequest,
+} from './types';
 
 export type AuthTokens = {
   accessToken: string;
@@ -22,6 +32,7 @@ type AuthResponse = {
   refreshToken?: string;
   role?: string;
   user?: AuthenticatedUser;
+  requires_verification?: boolean;
 };
 
 function deriveRole(role?: string, user?: AuthenticatedUser): string | undefined {
@@ -65,27 +76,14 @@ function applyTokens(tokens: AuthTokens): void {
   }
 }
 
-async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
-  const text = await response.text().catch(() => '');
-
-  if (text) {
-    try {
-      const parsed = JSON.parse(text) as { message?: string };
-      if (parsed && typeof parsed.message === 'string') {
-        return parsed.message;
-      }
-    } catch (error) {
-      return text;
-    }
-
-    return text;
-  }
-
-  return fallback;
+async function failWithToast(response: Response, fallback: string): Promise<Error> {
+  const message = await parseErrorResponse(response, fallback);
+  pushToast({ title: '操作失败', description: message, variant: 'error' });
+  return new Error(message);
 }
 
 export async function login(email: string, password: string): Promise<AuthTokens> {
-  const response = await fetch(buildUrl(authPath('/login')), {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/login')), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -94,8 +92,7 @@ export async function login(email: string, password: string): Promise<AuthTokens
   });
 
   if (!response.ok) {
-    const message = await parseErrorMessage(response, `Login failed (${response.status})`);
-    throw new Error(message);
+    throw await failWithToast(response, `Login failed (${response.status})`);
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -111,7 +108,7 @@ export async function refreshTokens(): Promise<AuthTokens> {
     throw new Error('Missing refresh token');
   }
 
-  const response = await fetch(buildUrl(authPath('/refresh')), {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/refresh')), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -120,8 +117,7 @@ export async function refreshTokens(): Promise<AuthTokens> {
   });
 
   if (!response.ok) {
-    const message = await parseErrorMessage(response, `Refresh failed (${response.status})`);
-    throw new Error(message);
+    throw await failWithToast(response, `Refresh failed (${response.status})`);
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -129,3 +125,84 @@ export async function refreshTokens(): Promise<AuthTokens> {
   applyTokens(tokens);
   return tokens;
 }
+
+export type RegisterResult = {
+  requires_verification: boolean;
+  tokens?: AuthTokens;
+  user?: AuthenticatedUser;
+};
+
+export async function registerAccount(payload: RegisterRequest): Promise<RegisterResult> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/register')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw await failWithToast(response, `Register failed (${response.status})`);
+  }
+
+  const data = (await response.json()) as AuthResponse;
+  const requiresVerification = Boolean(data.requires_verification);
+  if (!requiresVerification) {
+    const tokens = normalizeAuthResponse(data);
+    applyTokens(tokens);
+    return { requires_verification: false, tokens, user: tokens.user ?? data.user };
+  }
+  return { requires_verification: true, user: data.user };
+}
+
+export async function verifyEmail(payload: VerifyRequest): Promise<AuthTokens> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/verify')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw await failWithToast(response, `Verify failed (${response.status})`);
+  }
+
+  const data = (await response.json()) as AuthResponse;
+  const tokens = normalizeAuthResponse(data);
+  applyTokens(tokens);
+  return tokens;
+}
+
+export async function requestPasswordReset(payload: ForgotPasswordRequest): Promise<MessageResponse> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/forgot')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw await failWithToast(response, `Reset request failed (${response.status})`);
+  }
+
+  return (await response.json()) as MessageResponse;
+}
+
+export async function resetPassword(payload: ResetPasswordRequest): Promise<MessageResponse> {
+  const response = await (USE_MOCK ? mockFetch : fetch)(buildUrl(authPath('/reset')), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw await failWithToast(response, `Password reset failed (${response.status})`);
+  }
+
+  return (await response.json()) as MessageResponse;
+}
+

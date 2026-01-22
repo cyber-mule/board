@@ -1,5 +1,36 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import RichTextEditor from '@/components/RichTextEditor.vue';
 import { adminApi } from '../../../api';
 import { formatDateTime } from '../../../utils/format';
 import type {
@@ -26,7 +57,7 @@ const pagination = ref<PaginationMeta | null>(null);
 
 const filters = reactive({
   q: '',
-  status: '',
+  status: '__all__' as number | string,
   category: '',
   audience: '',
   sort: 'created',
@@ -57,6 +88,83 @@ const publishForm = reactive({
   operator: '',
 });
 
+function statusVariant(announcement: AnnouncementSummary): 'default' | 'secondary' | 'outline' {
+  switch (announcement.status) {
+    case 2:
+      return 'default';
+    case 1:
+      return 'secondary';
+    case 3:
+      return 'outline';
+    default:
+      return 'outline';
+  }
+}
+
+function statusLabel(announcement: AnnouncementSummary): string {
+  switch (announcement.status) {
+    case 1:
+      return '草稿';
+    case 2:
+      return '已发布';
+    case 3:
+      return '已归档';
+    default:
+      return '未知';
+  }
+}
+
+function categoryLabel(value?: string): string {
+  switch (value) {
+    case 'maintenance':
+      return '维护';
+    case 'feature':
+      return '功能';
+    case 'notice':
+      return '通知';
+    case 'warning':
+      return '警告';
+    default:
+      return value || '-';
+  }
+}
+
+function audienceLabel(value?: string): string {
+  switch (value) {
+    case 'all':
+      return '全体';
+    case 'user':
+      return '用户';
+    case 'admin':
+      return '管理员';
+    default:
+      return value || '-';
+  }
+}
+
+function extractText(html?: string): string {
+  if (!html) {
+    return '';
+  }
+  if (typeof DOMParser === 'undefined') {
+    return html;
+  }
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent?.trim() ?? '';
+}
+
+function contentPreview(content?: string): string {
+  const text = extractText(content);
+  if (!text) {
+    return '';
+  }
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
+
+function hasContent(html?: string): boolean {
+  return extractText(html).length > 0;
+}
+
 async function loadAnnouncements() {
   loading.value = true;
   errorMessage.value = '';
@@ -66,9 +174,9 @@ async function loadAnnouncements() {
       page: 1,
       per_page: perPage,
       q: filters.q || undefined,
-      status: filters.status || undefined,
-      category: filters.category || undefined,
-      audience: filters.audience || undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      category: filters.category && filters.category !== '__all__' ? filters.category : undefined,
+      audience: filters.audience && filters.audience !== '__all__' ? filters.audience : undefined,
       sort: filters.sort,
       direction: filters.direction,
     });
@@ -76,7 +184,7 @@ async function loadAnnouncements() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? 1;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load announcements';
+    errorMessage.value = error instanceof Error ? error.message : '加载公告失败';
   } finally {
     loading.value = false;
   }
@@ -97,9 +205,9 @@ async function loadMore() {
       page: targetPage,
       per_page: perPage,
       q: filters.q || undefined,
-      status: filters.status || undefined,
-      category: filters.category || undefined,
-      audience: filters.audience || undefined,
+      status: filters.status && filters.status !== '__all__' ? filters.status : undefined,
+      category: filters.category && filters.category !== '__all__' ? filters.category : undefined,
+      audience: filters.audience && filters.audience !== '__all__' ? filters.audience : undefined,
       sort: filters.sort,
       direction: filters.direction,
     });
@@ -107,7 +215,7 @@ async function loadMore() {
     pagination.value = response.pagination ?? null;
     page.value = response.pagination?.page ?? targetPage;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load more announcements';
+    errorMessage.value = error instanceof Error ? error.message : '加载更多公告失败';
   } finally {
     isLoadingMore.value = false;
   }
@@ -116,7 +224,7 @@ async function loadMore() {
 function openCreateModal() {
   createForm.title = '';
   createForm.content = '';
-  createForm.category = '';
+  createForm.category = '__unset__';
   createForm.audience = 'all';
   createForm.is_pinned = false;
   createForm.priority = 0;
@@ -129,8 +237,8 @@ function closeCreateModal() {
 }
 
 async function handleCreate() {
-  if (!createForm.title || !createForm.content) {
-    errorMessage.value = 'Please fill in title and content';
+  if (!createForm.title || !hasContent(createForm.content)) {
+    errorMessage.value = '请填写标题与内容';
     return;
   }
 
@@ -138,11 +246,16 @@ async function handleCreate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.createAdminAnnouncement(createForm);
+    const payload: CreateAnnouncementRequest = {
+      ...createForm,
+      category:
+        createForm.category === '__unset__' ? undefined : createForm.category || undefined,
+    };
+    await adminApi.createAdminAnnouncement(payload);
     closeCreateModal();
     await loadAnnouncements();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to create announcement';
+    errorMessage.value = error instanceof Error ? error.message : '创建公告失败';
   } finally {
     isSaving.value = false;
   }
@@ -152,7 +265,7 @@ function openEditModal(announcement: AnnouncementSummary) {
   selectedAnnouncement.value = announcement;
   editForm.title = announcement.title;
   editForm.content = announcement.content || '';
-  editForm.category = announcement.category || '';
+  editForm.category = announcement.category || '__unset__';
   editForm.audience = announcement.audience || 'all';
   editForm.is_pinned = announcement.is_pinned || false;
   editForm.priority = announcement.priority || 0;
@@ -171,11 +284,20 @@ async function handleUpdate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.updateAdminAnnouncement(selectedAnnouncement.value.id, editForm);
+    const payload: UpdateAnnouncementRequest = {
+      ...editForm,
+      category: editForm.category === '__unset__' ? undefined : editForm.category || undefined,
+    };
+    if (!hasContent(payload.content)) {
+      errorMessage.value = '内容不能为空';
+      isSaving.value = false;
+      return;
+    }
+    await adminApi.updateAdminAnnouncement(selectedAnnouncement.value.id, payload);
     closeEditModal();
     await loadAnnouncements();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to update announcement';
+    errorMessage.value = error instanceof Error ? error.message : '更新公告失败';
   } finally {
     isSaving.value = false;
   }
@@ -204,7 +326,7 @@ async function handlePublish() {
     closePublishModal();
     await loadAnnouncements();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to publish announcement';
+    errorMessage.value = error instanceof Error ? error.message : '发布公告失败';
   } finally {
     isSaving.value = false;
   }
@@ -216,23 +338,12 @@ function applyFilters() {
 
 function resetFilters() {
   filters.q = '';
-  filters.status = '';
+  filters.status = '__all__';
   filters.category = '';
   filters.audience = '';
   filters.sort = 'created';
   filters.direction = 'desc';
   loadAnnouncements();
-}
-
-function statusTone(announcement: AnnouncementSummary): string {
-  if (announcement.published_at) {
-    return 'status-pill status-pill--ok';
-  }
-  return 'status-pill status-pill--warn';
-}
-
-function statusLabel(announcement: AnnouncementSummary): string {
-  return announcement.published_at ? 'Published' : 'Draft';
 }
 
 onMounted(() => {
@@ -242,631 +353,327 @@ onMounted(() => {
 
 <template>
   <div class="page-section">
-    <header class="section__header">
+    <header class="page-section__header">
       <div>
-        <h3>Announcements</h3>
-        <p class="section__subtitle">
-          Manage system announcements for users
-        </p>
+        <p class="page__eyebrow">公告</p>
+        <h3 class="page-section__title">公告管理</h3>
+        <p class="page__subtitle">管理系统公告与推送范围。</p>
       </div>
-      <div class="section__actions">
-        <button class="button button--primary" type="button" @click="openCreateModal">
-          Create Announcement
-        </button>
+      <div class="page-section__actions">
+        <Button type="button" @click="openCreateModal">新建公告</Button>
       </div>
     </header>
 
-    <!-- Filters -->
-    <div class="section__filters">
-      <div class="filter-group">
-        <input
-          v-model="filters.q"
-          type="text"
-          placeholder="Search by title..."
-          class="input input--search"
-          @keyup.enter="applyFilters"
-        />
-        <select v-model="filters.status" class="select">
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="published">Published</option>
-        </select>
-        <select v-model="filters.category" class="select">
-          <option value="">All Categories</option>
-          <option value="maintenance">Maintenance</option>
-          <option value="feature">Feature</option>
-          <option value="notice">Notice</option>
-          <option value="warning">Warning</option>
-        </select>
-        <select v-model="filters.audience" class="select">
-          <option value="">All Audiences</option>
-          <option value="all">All Users</option>
-          <option value="user">Users</option>
-          <option value="admin">Admins</option>
-        </select>
-        <button class="button" type="button" @click="applyFilters">Apply</button>
-        <button class="button button--secondary" type="button" @click="resetFilters">Reset</button>
+    <form class="form-grid form-grid--wide" @submit.prevent="applyFilters">
+      <div class="stack stack--tight grid-span-2">
+        <Label>搜索</Label>
+        <Input v-model="filters.q" type="text" placeholder="标题关键词" />
       </div>
-    </div>
-
-    <!-- Error Message -->
-    <div v-if="errorMessage" class="alert alert--danger">
-      {{ errorMessage }}
-    </div>
-
-    <!-- Loading State -->
-    <div v-if="loading" class="loading-container">
-      <p>Loading announcements...</p>
-    </div>
-
-    <!-- Announcements List -->
-    <div v-else-if="announcements.length > 0" class="section__content">
-      <div class="data-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Category</th>
-              <th>Audience</th>
-              <th>Status</th>
-              <th>Pinned</th>
-              <th>Priority</th>
-              <th>Published</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="announcement in announcements" :key="announcement.id">
-              <td>
-                <div>
-                  <strong>{{ announcement.title }}</strong>
-                  <p v-if="announcement.content" class="text-muted text-truncate">
-                    {{ announcement.content.substring(0, 100) }}
-                    {{ announcement.content.length > 100 ? '...' : '' }}
-                  </p>
-                </div>
-              </td>
-              <td>
-                <span v-if="announcement.category" class="badge">{{ announcement.category }}</span>
-                <span v-else class="text-muted">-</span>
-              </td>
-              <td>
-                <span class="badge">{{ announcement.audience || 'all' }}</span>
-              </td>
-              <td>
-                <span :class="statusTone(announcement)">
-                  {{ statusLabel(announcement) }}
-                </span>
-              </td>
-              <td>
-                <span v-if="announcement.is_pinned" class="badge badge--primary">📌 Pinned</span>
-                <span v-else class="text-muted">-</span>
-              </td>
-              <td>{{ announcement.priority || 0 }}</td>
-              <td>
-                <span v-if="announcement.published_at" class="text-muted">
-                  {{ formatDateTime(announcement.published_at) }}
-                </span>
-                <span v-else class="text-muted">Not published</span>
-              </td>
-              <td>
-                <div class="action-buttons">
-                  <button
-                    v-if="!announcement.published_at"
-                    class="button button--small"
-                    type="button"
-                    @click="openEditModal(announcement)"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    class="button button--small button--primary"
-                    type="button"
-                    @click="openPublishModal(announcement)"
-                  >
-                    {{ announcement.published_at ? 'Republish' : 'Publish' }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="stack stack--tight">
+        <Label>状态</Label>
+        <Select v-model="filters.status">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem :value="1">草稿</SelectItem>
+            <SelectItem :value="2">已发布</SelectItem>
+            <SelectItem :value="3">已归档</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-
-      <!-- Load More -->
-      <div v-if="pagination?.has_next" class="section__footer">
-        <button
-          class="button button--secondary"
-          type="button"
-          :disabled="isLoadingMore"
-          @click="loadMore"
-        >
-          {{ isLoadingMore ? 'Loading...' : 'Load More' }}
-        </button>
-        <p class="text-muted">
-          Showing {{ announcements.length }} of {{ pagination.total_count }} announcements
-        </p>
+      <div class="stack stack--tight">
+        <Label>分类</Label>
+        <Select v-model="filters.category">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem value="maintenance">维护</SelectItem>
+            <SelectItem value="feature">功能</SelectItem>
+            <SelectItem value="notice">通知</SelectItem>
+            <SelectItem value="warning">警告</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-    </div>
+      <div class="stack stack--tight">
+        <Label>受众</Label>
+        <Select v-model="filters.audience">
+          <SelectTrigger>
+            <SelectValue placeholder="全部" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem value="all">全体</SelectItem>
+            <SelectItem value="user">用户</SelectItem>
+            <SelectItem value="admin">管理员</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="cluster cluster--end">
+        <Button type="submit">应用</Button>
+        <Button variant="secondary" type="button" @click="resetFilters">重置</Button>
+      </div>
+    </form>
 
-    <!-- Empty State -->
-    <div v-else class="empty-state">
-      <p>No announcements found. Create your first announcement to get started.</p>
-    </div>
+    <Alert v-if="errorMessage" variant="destructive">
+      <AlertTitle>加载失败</AlertTitle>
+      <AlertDescription>{{ errorMessage }}</AlertDescription>
+    </Alert>
 
-    <!-- Create Modal -->
-    <div v-if="showCreateModal" class="modal-overlay" @click.self="closeCreateModal">
-      <div class="modal">
-        <header class="modal__header">
-          <h3>Create Announcement</h3>
-          <button class="modal__close" type="button" @click="closeCreateModal">×</button>
-        </header>
-        <div class="modal__content">
-          <div class="form-group">
-            <label for="create-title">Title *</label>
-            <input
-              id="create-title"
-              v-model="createForm.title"
-              type="text"
-              class="input"
-              placeholder="Announcement title"
-            />
-          </div>
-          <div class="form-group">
-            <label for="create-content">Content *</label>
-            <textarea
-              id="create-content"
-              v-model="createForm.content"
-              class="input"
-              rows="8"
-              placeholder="Announcement content"
-            ></textarea>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="create-category">Category</label>
-              <select id="create-category" v-model="createForm.category" class="select">
-                <option value="">None</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="feature">Feature</option>
-                <option value="notice">Notice</option>
-                <option value="warning">Warning</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="create-audience">Audience</label>
-              <select id="create-audience" v-model="createForm.audience" class="select">
-                <option value="all">All Users</option>
-                <option value="user">Users Only</option>
-                <option value="admin">Admins Only</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="create-priority">Priority</label>
-              <input
-                id="create-priority"
-                v-model.number="createForm.priority"
-                type="number"
-                min="0"
-                class="input"
-                placeholder="0"
-              />
-            </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input v-model="createForm.is_pinned" type="checkbox" />
-                <span>Pin this announcement</span>
-              </label>
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="create-by">Created By</label>
-            <input
-              id="create-by"
-              v-model="createForm.created_by"
-              type="text"
-              class="input"
-              placeholder="Your name (optional)"
-            />
-          </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>公告列表</CardTitle>
+        <p class="panel-card__meta">共 {{ announcements.length }} 条</p>
+      </CardHeader>
+      <CardContent>
+        <p v-if="loading" class="panel-card__empty">正在加载公告...</p>
+        <p v-else-if="announcements.length === 0" class="panel-card__empty">暂无公告。</p>
+        <div v-else class="w-full overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>标题</TableHead>
+                <TableHead>分类</TableHead>
+                <TableHead>受众</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>置顶</TableHead>
+                <TableHead>优先级</TableHead>
+                <TableHead>发布时间</TableHead>
+                <TableHead>操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="announcement in announcements" :key="announcement.id">
+                <TableCell>
+                  <div class="stack stack--tight">
+                    <p class="font-medium">{{ announcement.title }}</p>
+                    <p v-if="announcement.content" class="text-xs text-muted-foreground">
+                      {{ contentPreview(announcement.content) }}
+                    </p>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline">{{ categoryLabel(announcement.category) }}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{{ audienceLabel(announcement.audience || 'all') }}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge :variant="statusVariant(announcement)">{{ statusLabel(announcement) }}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge v-if="announcement.is_pinned" variant="default">置顶</Badge>
+                  <span v-else class="text-xs text-muted-foreground">-</span>
+                </TableCell>
+                <TableCell>{{ announcement.priority || 0 }}</TableCell>
+                <TableCell>
+                  <span v-if="announcement.published_at" class="text-xs text-muted-foreground">
+                    {{ formatDateTime(announcement.published_at) }}
+                  </span>
+                  <span v-else class="text-xs text-muted-foreground">未发布</span>
+                </TableCell>
+                <TableCell>
+                  <div class="cluster">
+                    <Button
+                      v-if="!announcement.published_at"
+                      size="sm"
+                      variant="secondary"
+                      type="button"
+                      @click="openEditModal(announcement)"
+                    >
+                      编辑
+                    </Button>
+                    <Button size="sm" type="button" @click="openPublishModal(announcement)">
+                      {{ announcement.published_at ? '重新发布' : '发布' }}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeCreateModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
+        <div v-if="pagination?.has_next" class="list-footer">
+          <Button
+            variant="secondary"
             type="button"
-            :disabled="isSaving"
-            @click="handleCreate"
+            :disabled="isLoadingMore"
+            @click="loadMore"
           >
-            {{ isSaving ? 'Creating...' : 'Create' }}
-          </button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Edit Modal -->
-    <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
-      <div class="modal">
-        <header class="modal__header">
-          <h3>Edit Announcement</h3>
-          <button class="modal__close" type="button" @click="closeEditModal">×</button>
-        </header>
-        <div class="modal__content">
-          <div class="form-group">
-            <label for="edit-title">Title</label>
-            <input
-              id="edit-title"
-              v-model="editForm.title"
-              type="text"
-              class="input"
-              placeholder="Announcement title"
-            />
-          </div>
-          <div class="form-group">
-            <label for="edit-content">Content</label>
-            <textarea
-              id="edit-content"
-              v-model="editForm.content"
-              class="input"
-              rows="8"
-              placeholder="Announcement content"
-            ></textarea>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-category">Category</label>
-              <select id="edit-category" v-model="editForm.category" class="select">
-                <option value="">None</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="feature">Feature</option>
-                <option value="notice">Notice</option>
-                <option value="warning">Warning</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="edit-audience">Audience</label>
-              <select id="edit-audience" v-model="editForm.audience" class="select">
-                <option value="all">All Users</option>
-                <option value="user">Users Only</option>
-                <option value="admin">Admins Only</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="edit-priority">Priority</label>
-              <input
-                id="edit-priority"
-                v-model.number="editForm.priority"
-                type="number"
-                min="0"
-                class="input"
-                placeholder="0"
-              />
-            </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input v-model="editForm.is_pinned" type="checkbox" />
-                <span>Pin this announcement</span>
-              </label>
-            </div>
-          </div>
-        </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closeEditModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="isSaving"
-            @click="handleUpdate"
-          >
-            {{ isSaving ? 'Updating...' : 'Update' }}
-          </button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Publish Modal -->
-    <div v-if="showPublishModal" class="modal-overlay" @click.self="closePublishModal">
-      <div class="modal modal--small">
-        <header class="modal__header">
-          <h3>Publish Announcement</h3>
-          <button class="modal__close" type="button" @click="closePublishModal">×</button>
-        </header>
-        <div class="modal__content">
-          <p>
-            Publishing this announcement will make it visible to users based on the audience setting.
+            {{ isLoadingMore ? '加载中...' : '加载更多' }}
+          </Button>
+          <p class="text-xs text-muted-foreground">
+            已显示 {{ announcements.length }} / {{ pagination.total_count }}
           </p>
-          <div class="form-group">
-            <label for="publish-visible-to">Visible Until (Unix timestamp)</label>
-            <input
+        </div>
+      </CardContent>
+    </Card>
+
+    <Dialog v-model:open="showCreateModal">
+      <DialogContent class="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>新建公告</DialogTitle>
+          <DialogDescription>发布给用户或管理员的系统通知。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="stack stack--tight">
+            <Label for="create-title">标题 *</Label>
+            <Input id="create-title" v-model="createForm.title" type="text" placeholder="公告标题" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>内容 *</Label>
+            <RichTextEditor v-model="createForm.content" placeholder="公告正文" />
+          </div>
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label>分类</Label>
+              <Select v-model="createForm.category">
+                <SelectTrigger>
+                  <SelectValue placeholder="不设置" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unset__">不设置</SelectItem>
+                  <SelectItem value="maintenance">维护</SelectItem>
+                  <SelectItem value="feature">功能</SelectItem>
+                  <SelectItem value="notice">通知</SelectItem>
+                  <SelectItem value="warning">警告</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="stack stack--tight">
+              <Label>受众</Label>
+              <Select v-model="createForm.audience">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全体</SelectItem>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="create-priority">优先级</Label>
+              <Input id="create-priority" v-model.number="createForm.priority" type="number" min="0" />
+            </div>
+            <div class="cluster cluster--center form__field--offset">
+              <Checkbox id="create-pinned" v-model="createForm.is_pinned" />
+              <Label for="create-pinned">置顶显示</Label>
+            </div>
+          </div>
+          <div class="stack stack--tight">
+            <Label for="create-by">创建人</Label>
+            <Input id="create-by" v-model="createForm.created_by" type="text" placeholder="可选" />
+          </div>
+        </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeCreateModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleCreate">
+            {{ isSaving ? '创建中...' : '创建公告' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showEditModal">
+      <DialogContent class="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>编辑公告</DialogTitle>
+          <DialogDescription>更新公告内容与展示设置。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="stack stack--tight">
+            <Label for="edit-title">标题</Label>
+            <Input id="edit-title" v-model="editForm.title" type="text" placeholder="公告标题" />
+          </div>
+          <div class="stack stack--tight">
+            <Label>内容</Label>
+            <RichTextEditor v-model="editForm.content" placeholder="公告正文" />
+          </div>
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label>分类</Label>
+              <Select v-model="editForm.category">
+                <SelectTrigger>
+                  <SelectValue placeholder="不设置" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unset__">不设置</SelectItem>
+                  <SelectItem value="maintenance">维护</SelectItem>
+                  <SelectItem value="feature">功能</SelectItem>
+                  <SelectItem value="notice">通知</SelectItem>
+                  <SelectItem value="warning">警告</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="stack stack--tight">
+              <Label>受众</Label>
+              <Select v-model="editForm.audience">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全体</SelectItem>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="stack stack--tight">
+              <Label for="edit-priority">优先级</Label>
+              <Input id="edit-priority" v-model.number="editForm.priority" type="number" min="0" />
+            </div>
+            <div class="cluster cluster--center form__field--offset">
+              <Checkbox id="edit-pinned" v-model="editForm.is_pinned" />
+              <Label for="edit-pinned">置顶显示</Label>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closeEditModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handleUpdate">
+            {{ isSaving ? '更新中...' : '保存修改' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showPublishModal">
+      <DialogContent class="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>发布公告</DialogTitle>
+          <DialogDescription>发布后，公告将按受众范围展示。</DialogDescription>
+        </DialogHeader>
+        <div class="stack">
+          <div class="stack stack--tight">
+            <Label for="publish-visible-to">可见截止（Unix 时间戳）</Label>
+            <Input
               id="publish-visible-to"
               v-model.number="publishForm.visible_to"
               type="number"
               min="0"
-              class="input"
-              placeholder="0 for no expiry"
+              placeholder="0 表示不过期"
             />
-            <small class="form-help">Leave as 0 for no expiration</small>
           </div>
-          <div class="form-group">
-            <label for="publish-operator">Operator</label>
-            <input
-              id="publish-operator"
-              v-model="publishForm.operator"
-              type="text"
-              class="input"
-              placeholder="Your name (optional)"
-            />
+          <div class="stack stack--tight">
+            <Label for="publish-operator">操作人</Label>
+            <Input id="publish-operator" v-model="publishForm.operator" type="text" placeholder="可选" />
           </div>
         </div>
-        <footer class="modal__footer">
-          <button class="button button--secondary" type="button" @click="closePublishModal">
-            Cancel
-          </button>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="isSaving"
-            @click="handlePublish"
-          >
-            {{ isSaving ? 'Publishing...' : 'Publish' }}
-          </button>
-        </footer>
-      </div>
-    </div>
+        <DialogFooter class="mt-4">
+          <Button variant="secondary" type="button" @click="closePublishModal">取消</Button>
+          <Button type="button" :disabled="isSaving" @click="handlePublish">
+            {{ isSaving ? '发布中...' : '确认发布' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
-
-<style scoped>
-.page-section {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.section__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.section__subtitle {
-  margin-top: 0.5rem;
-  color: #6b7280;
-  font-size: 0.875rem;
-}
-
-.section__actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.section__filters {
-  padding: 1rem;
-  background: #f9fafb;
-  border-radius: 0.5rem;
-}
-
-.filter-group {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.input--search {
-  flex: 1;
-  min-width: 200px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  padding-top: 1.75rem;
-}
-
-.data-table {
-  overflow-x: auto;
-}
-
-.data-table table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.data-table th {
-  text-align: left;
-  padding: 0.75rem;
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: #374151;
-}
-
-.data-table td {
-  padding: 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  background: #e5e7eb;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.badge--primary {
-  background: #dbeafe;
-  color: #1e40af;
-}
-
-.text-muted {
-  color: #6b7280;
-  font-size: 0.875rem;
-}
-
-.text-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 300px;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.section__footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
-}
-
-.empty-state {
-  padding: 3rem;
-  text-align: center;
-  color: #6b7280;
-}
-
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: white;
-  border-radius: 0.5rem;
-  width: 90%;
-  max-width: 800px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-}
-
-.modal--small {
-  max-width: 500px;
-}
-
-.modal__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal__close {
-  font-size: 1.5rem;
-  line-height: 1;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-}
-
-.modal__close:hover {
-  background: #f3f4f6;
-}
-
-.modal__content {
-  padding: 1.5rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: #374151;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.input,
-.select {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-
-.input:focus,
-.select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.form-help {
-  display: block;
-  margin-top: 0.25rem;
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.loading-container {
-  padding: 2rem;
-  text-align: center;
-  color: #6b7280;
-}
-
-.alert {
-  padding: 1rem;
-  border-radius: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.alert--danger {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
-}
-</style>
