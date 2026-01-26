@@ -333,6 +333,16 @@ const entryTemplates = computed(() => [
   ...customTemplates.value.entry,
 ]);
 
+const isAnyModalOpen = computed(
+  () =>
+    showCreateBindingModal.value ||
+    showEditBindingModal.value ||
+    showDeleteBindingModal.value ||
+    showCreateEntryModal.value ||
+    showEditEntryModal.value ||
+    showDeleteEntryModal.value,
+);
+
 const hasNextBindings = computed(() => bindingsPagination.value?.has_next ?? false);
 const hasNextEntries = computed(() => entriesPagination.value?.has_next ?? false);
 const visibleBindingIds = computed(() => bindings.value.map((binding) => binding.id));
@@ -1238,6 +1248,23 @@ watch(showCreateEntryModal, (value) => {
   }
 });
 
+watch(
+  [
+    showCreateBindingModal,
+    showEditBindingModal,
+    showDeleteBindingModal,
+    showCreateEntryModal,
+    showEditEntryModal,
+    showDeleteEntryModal,
+  ],
+  (values) => {
+    if (values.some(Boolean)) {
+      actionMessage.value = '';
+      actionError.value = '';
+    }
+  },
+);
+
 watch(activeTab, (value) => {
   if (value === 'bindings' && !bindings.value.length) {
     void loadBindings(true);
@@ -1292,11 +1319,14 @@ onMounted(() => {
       </div>
     </header>
 
-    <Alert v-if="actionMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+    <Alert
+      v-if="actionMessage && !isAnyModalOpen"
+      class="border-emerald-200 bg-emerald-50 text-emerald-800"
+    >
       <AlertTitle>操作成功</AlertTitle>
       <AlertDescription>{{ actionMessage }}</AlertDescription>
     </Alert>
-    <Alert v-if="actionError" variant="destructive">
+    <Alert v-if="actionError && !isAnyModalOpen" variant="destructive">
       <AlertTitle>操作失败</AlertTitle>
       <AlertDescription>{{ actionError }}</AlertDescription>
     </Alert>
@@ -1547,6 +1577,17 @@ onMounted(() => {
           <DialogTitle>新建节点协议绑定</DialogTitle>
           <DialogDescription>选择模板后绑定到节点。</DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="form-grid">
           <div class="form-grid__full">
             <Label>协议模板（预设）</Label>
@@ -1656,6 +1697,17 @@ onMounted(() => {
           <DialogTitle>编辑节点协议绑定</DialogTitle>
           <DialogDescription>更新节点绑定配置。</DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="form-grid">
           <div>
             <Label for="binding-edit-name">名称</Label>
@@ -1739,6 +1791,17 @@ onMounted(() => {
             删除节点绑定 {{ selectedBinding?.name || selectedBinding?.id }} 后无法恢复。
           </DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <DialogFooter>
           <Button type="button" variant="secondary" @click="showDeleteBindingModal = false">取消</Button>
           <Button type="button" variant="destructive" :disabled="isSaving" @click="handleDeleteBinding">
@@ -1754,6 +1817,17 @@ onMounted(() => {
           <DialogTitle>新建对外入口</DialogTitle>
           <DialogDescription>填写对外入口信息。</DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="form-grid">
           <div class="form-grid__full">
             <Label>协议模板（预设）</Label>
@@ -1839,6 +1913,17 @@ onMounted(() => {
           <DialogTitle>编辑对外入口</DialogTitle>
           <DialogDescription>更新对外入口信息。</DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="form-grid">
           <div>
             <Label for="entry-edit-name">名称</Label>
@@ -1902,6 +1987,17 @@ onMounted(() => {
             删除入口 {{ selectedEntry?.name || selectedEntry?.id }} 后无法恢复。
           </DialogDescription>
         </DialogHeader>
+        <Alert
+          v-if="actionMessage"
+          class="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800"
+        >
+          <AlertTitle>操作成功</AlertTitle>
+          <AlertDescription>{{ actionMessage }}</AlertDescription>
+        </Alert>
+        <Alert v-if="actionError" variant="destructive" class="mb-4">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <DialogFooter>
           <Button type="button" variant="secondary" @click="showDeleteEntryModal = false">取消</Button>
           <Button type="button" variant="destructive" :disabled="isSaving" @click="handleDeleteEntry">
