@@ -37,6 +37,8 @@ const plans = ref<PlanSummary[]>([]);
 const loading = ref(true);
 const isLoadingMore = ref(false);
 const errorMessage = ref('');
+const actionMessage = ref('');
+const actionError = ref('');
 
 const selectedPlan = ref<PlanSummary | null>(null);
 const showCreateModal = ref(false);
@@ -112,6 +114,35 @@ const createTrafficValue = ref<number | null>(0);
 const createTrafficUnit = ref<TrafficUnit>('gb');
 const editTrafficValue = ref<number | null>(0);
 const editTrafficUnit = ref<TrafficUnit>('gb');
+const filteredBindingIds = computed(() => filteredBindings.value.map((binding) => binding.id));
+const createBindingSelectionState = computed<boolean | 'indeterminate'>(() => {
+  const visibleIds = filteredBindingIds.value;
+  if (!visibleIds.length) {
+    return false;
+  }
+  const selectedInView = visibleIds.filter((id) => createForm.binding_ids.includes(id));
+  if (!selectedInView.length) {
+    return false;
+  }
+  if (selectedInView.length === visibleIds.length) {
+    return true;
+  }
+  return 'indeterminate';
+});
+const editBindingSelectionState = computed<boolean | 'indeterminate'>(() => {
+  const visibleIds = filteredBindingIds.value;
+  if (!visibleIds.length) {
+    return false;
+  }
+  const selectedInView = visibleIds.filter((id) => editForm.binding_ids.includes(id));
+  if (!selectedInView.length) {
+    return false;
+  }
+  if (selectedInView.length === visibleIds.length) {
+    return true;
+  }
+  return 'indeterminate';
+});
 
 const filteredBindings = computed(() => {
   const query = bindingSearch.value.trim().toLowerCase();
@@ -229,6 +260,31 @@ function removeBinding(list: number[], bindingId: number) {
   }
 }
 
+function toggleAllBindings(list: number[], checked: boolean | 'indeterminate') {
+  const visibleIds = filteredBindingIds.value;
+  if (!visibleIds.length) {
+    return;
+  }
+  const shouldSelect = checked === true;
+  if (shouldSelect) {
+    visibleIds.forEach((id) => {
+      if (!list.includes(id)) {
+        list.push(id);
+      }
+    });
+    return;
+  }
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (visibleIds.includes(list[index])) {
+      list.splice(index, 1);
+    }
+  }
+}
+
+function clearBindings(list: number[]) {
+  list.splice(0, list.length);
+}
+
 async function loadProtocolBindings() {
   bindingsLoading.value = true;
   bindingsError.value = '';
@@ -311,6 +367,7 @@ function selectPlan(plan: PlanSummary) {
 }
 
 function openCreateModal() {
+  actionError.value = '';
   createForm.name = '';
   createForm.slug = '';
   createForm.description = '';
@@ -341,13 +398,23 @@ function closeCreateModal() {
 }
 
 async function handleCreate() {
-  if (!createForm.name || createForm.price_cents <= 0 || createForm.duration_days <= 0) {
-    errorMessage.value = '请填写必填项并确认数值有效';
+  actionError.value = '';
+  if (!createForm.name) {
+    actionError.value = '请填写套餐名称。';
+    return;
+  }
+  if (createForm.duration_days <= 0) {
+    actionError.value = '时长必须大于 0。';
+    return;
+  }
+  if (createForm.price_cents < 0) {
+    actionError.value = '价格不能小于 0。';
     return;
   }
 
   isSaving.value = true;
   errorMessage.value = '';
+  actionMessage.value = '';
 
   try {
     const payload: CreatePlanRequest = {
@@ -355,16 +422,18 @@ async function handleCreate() {
       traffic_limit_bytes: toBytes(createTrafficValue.value, createTrafficUnit.value),
     };
     await adminApi.createAdminPlan(payload);
+    actionMessage.value = '套餐已创建。';
     closeCreateModal();
     await loadPlans();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '创建套餐失败';
+    actionError.value = error instanceof Error ? error.message : '创建套餐失败';
   } finally {
     isSaving.value = false;
   }
 }
 
 function openEditModal(plan: PlanSummary) {
+  actionError.value = '';
   selectedPlan.value = plan;
   editForm.name = plan.name;
   editForm.slug = plan.slug || '';
@@ -400,18 +469,20 @@ function closeEditModal() {
 async function handleUpdate() {
   if (!selectedPlan.value) return;
 
+  actionError.value = '';
   if (editForm.price_cents && editForm.price_cents <= 0) {
-    errorMessage.value = '价格必须大于 0';
+    actionError.value = '价格必须大于 0';
     return;
   }
 
   if (editForm.duration_days && editForm.duration_days <= 0) {
-    errorMessage.value = '时长必须大于 0';
+    actionError.value = '时长必须大于 0';
     return;
   }
 
   isSaving.value = true;
   errorMessage.value = '';
+  actionMessage.value = '';
 
   try {
     const payload: UpdatePlanRequest = {
@@ -419,10 +490,11 @@ async function handleUpdate() {
       traffic_limit_bytes: toBytes(editTrafficValue.value, editTrafficUnit.value),
     };
     await adminApi.updateAdminPlan(selectedPlan.value.id, payload);
+    actionMessage.value = '套餐已更新。';
     closeEditModal();
     await loadPlans();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '更新套餐失败';
+    actionError.value = error instanceof Error ? error.message : '更新套餐失败';
   } finally {
     isSaving.value = false;
   }
@@ -572,6 +644,9 @@ onMounted(() => {
       <AlertTitle>操作失败</AlertTitle>
       <AlertDescription>{{ errorMessage }}</AlertDescription>
     </Alert>
+    <Alert v-if="actionMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+      <AlertDescription>{{ actionMessage }}</AlertDescription>
+    </Alert>
 
     <div class="split-grid">
       <Card>
@@ -684,6 +759,9 @@ onMounted(() => {
           <DialogTitle>新建套餐</DialogTitle>
           <DialogDescription>请填写套餐价格、时长与流量限制。</DialogDescription>
         </DialogHeader>
+        <Alert v-if="actionError" variant="destructive">
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="stack">
           <div class="form-grid">
             <div class="stack stack--tight">
@@ -855,6 +933,29 @@ onMounted(() => {
 
           <div class="stack stack--tight">
             <Label>协议绑定</Label>
+            <div class="cluster cluster--between cluster--center">
+              <div class="cluster cluster--center">
+                <Checkbox
+                  :checked="createBindingSelectionState"
+                  :disabled="bindingsLoading || !filteredBindings.length"
+                  aria-label="全选绑定"
+                  @update:checked="(checked) => toggleAllBindings(createForm.binding_ids, checked)"
+                />
+                <span class="text-sm text-muted-foreground">全选</span>
+                <span class="text-xs text-muted-foreground">
+                  已选 {{ createForm.binding_ids.length }} 项
+                </span>
+              </div>
+              <Button
+                v-if="createForm.binding_ids.length"
+                type="button"
+                variant="ghost"
+                size="sm"
+                @click="clearBindings(createForm.binding_ids)"
+              >
+                清空
+              </Button>
+            </div>
             <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
             <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
             <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
@@ -913,6 +1014,9 @@ onMounted(() => {
           <DialogTitle>编辑套餐</DialogTitle>
           <DialogDescription>更新套餐定价与能力配置。</DialogDescription>
         </DialogHeader>
+        <Alert v-if="actionError" variant="destructive">
+          <AlertDescription>{{ actionError }}</AlertDescription>
+        </Alert>
         <div class="stack">
           <div class="form-grid">
             <div class="stack stack--tight">
@@ -1084,6 +1188,29 @@ onMounted(() => {
 
           <div class="stack stack--tight">
             <Label>协议绑定</Label>
+            <div class="cluster cluster--between cluster--center">
+              <div class="cluster cluster--center">
+                <Checkbox
+                  :checked="editBindingSelectionState"
+                  :disabled="bindingsLoading || !filteredBindings.length"
+                  aria-label="全选绑定"
+                  @update:checked="(checked) => toggleAllBindings(editForm.binding_ids, checked)"
+                />
+                <span class="text-sm text-muted-foreground">全选</span>
+                <span class="text-xs text-muted-foreground">
+                  已选 {{ editForm.binding_ids.length }} 项
+                </span>
+              </div>
+              <Button
+                v-if="editForm.binding_ids.length"
+                type="button"
+                variant="ghost"
+                size="sm"
+                @click="clearBindings(editForm.binding_ids)"
+              >
+                清空
+              </Button>
+            </div>
             <Input v-model="bindingSearch" type="search" placeholder="搜索节点、协议或绑定 ID" />
             <p v-if="bindingsLoading" class="panel-card__empty">正在加载协议绑定...</p>
             <p v-else-if="bindingsError" class="panel-card__empty">{{ bindingsError }}</p>
