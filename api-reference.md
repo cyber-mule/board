@@ -764,6 +764,12 @@ AdminSubscriptionSummary 字段：
   - `templates` []SubscriptionTemplateSummary
   - `pagination` PaginationMeta
 
+#### GET /api/v1/{adminPrefix}/subscription-templates/clients
+
+- 说明：订阅模板支持的客户端列表（服务端下发，默认来自 Zero Core 内置规则）
+- 响应：
+  - `clients` []SubscriptionTemplateClient
+
 TemplateVariable 字段：
 
 - `value_type` string
@@ -781,6 +787,13 @@ SubscriptionTemplateSummary 字段：
 - `updated_at` int64
 - `published_at` int64
 - `last_published_by` string
+
+SubscriptionTemplateClient 字段：
+
+- `client_type` string
+- `display_name` string
+- `user_agent_tokens` []string
+- `source` string
 
 #### POST /api/v1/{adminPrefix}/subscription-templates
 

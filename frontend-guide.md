@@ -296,6 +296,7 @@ Content-Type: application/json
 ### 6.5 订阅拉取地址（客户端）
 
 - `GET /api/v1/subscriptions/{token}`
+- 客户端列表由服务端下发：`GET /api/v1/{adminPrefix}/subscription-templates/clients`（默认 `source=zero-core`）
 - 根据 `User-Agent` 自动选择模板：
   - 命中 `clash` 相关客户端 → `client_type=clash`
   - 命中 `sing-box` 客户端 → `client_type=sing-box`
