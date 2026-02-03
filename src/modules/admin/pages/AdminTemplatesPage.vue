@@ -36,6 +36,7 @@ import { formatDateTime } from '../../../utils/format';
 import type {
   CreateTemplateRequest,
   PaginationMeta,
+  SubscriptionTemplateClient,
   SubscriptionTemplateHistoryEntry,
   SubscriptionTemplateSummary,
   UpdateTemplateRequest,
@@ -45,6 +46,9 @@ const templates = ref<SubscriptionTemplateSummary[]>([]);
 const loading = ref(true);
 const isLoadingMore = ref(false);
 const errorMessage = ref('');
+const clientOptions = ref<SubscriptionTemplateClient[]>([]);
+const clientOptionsLoading = ref(false);
+const clientOptionsError = ref('');
 
 const selectedTemplate = ref<SubscriptionTemplateSummary | null>(null);
 const historyEntries = ref<SubscriptionTemplateHistoryEntry[]>([]);
@@ -102,19 +106,28 @@ function statusLabel(template: SubscriptionTemplateSummary): string {
 }
 
 function clientTypeLabel(value?: string) {
-  switch (value) {
-    case 'clash':
-      return 'Clash';
-    case 'v2ray':
-      return 'V2Ray';
-    case 'shadowsocks':
-      return 'Shadowsocks';
-    case 'surge':
-      return 'Surge';
-    case 'quantumult':
-      return 'Quantumult';
-    default:
-      return value || '-';
+  if (!value) {
+    return '-';
+  }
+  const matched = clientOptions.value.find((item) => item.client_type === value);
+  return matched?.display_name || value;
+}
+
+async function loadTemplateClients() {
+  clientOptionsLoading.value = true;
+  clientOptionsError.value = '';
+
+  try {
+    const response = await adminApi.fetchAdminTemplateClients();
+    clientOptions.value = response.clients ?? [];
+    if (!createForm.client_type && clientOptions.value.length > 0) {
+      createForm.client_type = clientOptions.value[0].client_type;
+    }
+  } catch (error) {
+    clientOptionsError.value =
+      error instanceof Error ? error.message : '加载客户端列表失败';
+  } finally {
+    clientOptionsLoading.value = false;
   }
 }
 
@@ -185,7 +198,7 @@ async function loadMore() {
 function openCreateModal() {
   createForm.name = '';
   createForm.description = '';
-  createForm.client_type = 'clash';
+  createForm.client_type = clientOptions.value[0]?.client_type ?? '';
   createForm.format = 'yaml';
   createForm.content = '';
   createForm.variables = {};
@@ -316,6 +329,7 @@ function resetFilters() {
 }
 
 onMounted(() => {
+  loadTemplateClients();
   loadTemplates();
 });
 </script>
@@ -340,19 +354,27 @@ onMounted(() => {
       </div>
       <div class="stack stack--tight">
         <Label>客户端</Label>
-        <Select v-model="filters.client_type">
+        <Select v-model="filters.client_type" :disabled="clientOptionsLoading">
           <SelectTrigger>
-            <SelectValue placeholder="全部" />
+            <SelectValue :placeholder="clientOptionsLoading ? '加载中...' : '全部'" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部</SelectItem>
-            <SelectItem value="clash">Clash</SelectItem>
-            <SelectItem value="v2ray">V2Ray</SelectItem>
-            <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
-            <SelectItem value="surge">Surge</SelectItem>
-            <SelectItem value="quantumult">Quantumult</SelectItem>
+            <SelectItem
+              v-for="client in clientOptions"
+              :key="client.client_type"
+              :value="client.client_type"
+            >
+              {{ client.display_name || client.client_type }}
+            </SelectItem>
+            <SelectItem v-if="!clientOptions.length && !clientOptionsLoading" disabled value="__empty__">
+              暂无客户端
+            </SelectItem>
           </SelectContent>
         </Select>
+        <p v-if="clientOptionsError" class="text-xs text-destructive">
+          {{ clientOptionsError }}
+        </p>
       </div>
       <div class="stack stack--tight">
         <Label>格式</Label>
@@ -475,18 +497,26 @@ onMounted(() => {
           </div>
           <div class="stack stack--tight">
             <Label>客户端 *</Label>
-            <Select v-model="createForm.client_type">
+            <Select v-model="createForm.client_type" :disabled="clientOptionsLoading">
               <SelectTrigger>
-                <SelectValue placeholder="请选择" />
+                <SelectValue :placeholder="clientOptionsLoading ? '加载中...' : '请选择'" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="clash">Clash</SelectItem>
-                <SelectItem value="v2ray">V2Ray</SelectItem>
-                <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
-                <SelectItem value="surge">Surge</SelectItem>
-                <SelectItem value="quantumult">Quantumult</SelectItem>
+                <SelectItem
+                  v-for="client in clientOptions"
+                  :key="client.client_type"
+                  :value="client.client_type"
+                >
+                  {{ client.display_name || client.client_type }}
+                </SelectItem>
+                <SelectItem v-if="!clientOptions.length && !clientOptionsLoading" disabled value="__empty__">
+                  暂无客户端
+                </SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="clientOptionsError" class="text-xs text-destructive">
+              {{ clientOptionsError }}
+            </p>
           </div>
           <div class="stack stack--tight">
             <Label>格式 *</Label>

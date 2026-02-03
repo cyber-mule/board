@@ -38,6 +38,7 @@ import type {
   ResetUserPasswordRequest,
   SecuritySettingsResponse,
   AdminSubscriptionSummary,
+  SubscriptionTemplateClientsResponse,
   SubscriptionTemplateSummary,
   SyncNodeKernelsResponse,
   TemplateHistoryResponse,
@@ -161,6 +162,10 @@ type AdminTemplatesQuery = PaginationQuery & {
   client_type?: string;
   format?: string;
   include_drafts?: boolean;
+};
+
+type AdminTemplateClientsQuery = {
+  source?: string;
 };
 
 type AdminSubscriptionsQuery = PaginationQuery & {
@@ -549,6 +554,12 @@ export function publishAdminAnnouncement(id: number, payload: PublishAnnouncemen
 export function fetchAdminTemplates(query: AdminTemplatesQuery = {}) {
   return requestJson<PaginatedResponse<{ templates: SubscriptionTemplateSummary[] }>>(
     withQuery(adminPath('/subscription-templates'), query),
+  );
+}
+
+export function fetchAdminTemplateClients(query: AdminTemplateClientsQuery = {}) {
+  return requestJson<SubscriptionTemplateClientsResponse>(
+    withQuery(adminPath('/subscription-templates/clients'), query),
   );
 }
 

@@ -17,6 +17,7 @@ import type {
   ProtocolBindingSummary,
   ProtocolEntrySummary,
   SiteSetting,
+  SubscriptionTemplateClient,
   SubscriptionTemplateSummary,
   AdminOrderDetail,
   SecuritySetting,
@@ -684,6 +685,45 @@ export const mockTemplates: SubscriptionTemplateSummary[] = [
     is_published: false,
     created_at: Date.now() - 10 * 24 * 60 * 60 * 1000,
     updated_at: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+];
+
+export const mockTemplateClients: SubscriptionTemplateClient[] = [
+  {
+    client_type: 'clash',
+    display_name: 'Clash',
+    user_agent_tokens: ['clash', 'mihomo', 'clash-verge'],
+    source: 'zero-core',
+  },
+  {
+    client_type: 'v2ray',
+    display_name: 'V2Ray',
+    user_agent_tokens: ['v2rayn', 'v2rayng'],
+    source: 'zero-core',
+  },
+  {
+    client_type: 'shadowsocks',
+    display_name: 'Shadowsocks',
+    user_agent_tokens: ['shadowsocks', 'shadowrocket'],
+    source: 'zero-core',
+  },
+  {
+    client_type: 'surge',
+    display_name: 'Surge',
+    user_agent_tokens: ['surge', 'stash'],
+    source: 'zero-core',
+  },
+  {
+    client_type: 'quantumult',
+    display_name: 'Quantumult',
+    user_agent_tokens: ['quantumult'],
+    source: 'zero-core',
+  },
+  {
+    client_type: 'sing-box',
+    display_name: 'Sing-box',
+    user_agent_tokens: ['sing-box', 'nekobox', 'loon'],
+    source: 'zero-core',
   },
 ];
 

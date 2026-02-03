@@ -17,6 +17,7 @@ import {
   mockProtocolBindings,
   mockProtocolEntries,
   mockTemplates,
+  mockTemplateClients,
   mockPaymentChannels,
   mockSiteSettings,
   mockAuditLogs,
@@ -490,6 +491,8 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
   console.log('[MOCK]', method, url, body);
   const adminTemplatePath = `${API_PREFIX}/${ADMIN_PREFIX}/subscription-templates`;
   const adminTemplateLegacyPath = `${API_PREFIX}/${ADMIN_PREFIX}/templates`;
+  const adminTemplateClientsPath = `${adminTemplatePath}/clients`;
+  const adminTemplateClientsLegacyPath = `${adminTemplateLegacyPath}/clients`;
 
   // Auth endpoints
   if (matchPath(url, `${API_PREFIX}/auth/login`)) {
@@ -1873,6 +1876,12 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
         updated_at: Date.now(),
       };
       return mockResponse({ announcement: mockAnnouncements[announcementIndex] });
+    }
+  }
+
+  if (matchPath(url, adminTemplateClientsPath) || matchPath(url, adminTemplateClientsLegacyPath)) {
+    if (method === 'GET') {
+      return mockResponse({ clients: mockTemplateClients });
     }
   }
 

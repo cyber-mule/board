@@ -733,6 +733,17 @@ export type SubscriptionTemplateHistoryEntry = {
   variables?: Record<string, TemplateVariable>;
 };
 
+export type SubscriptionTemplateClient = {
+  client_type: string;
+  display_name: string;
+  user_agent_tokens: string[];
+  source: string;
+};
+
+export type SubscriptionTemplateClientsResponse = {
+  clients: SubscriptionTemplateClient[];
+};
+
 export type CreateTemplateRequest = {
   name: string;
   description?: string;
