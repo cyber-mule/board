@@ -38,6 +38,7 @@ import type {
   CreateProtocolEntryRequest,
   PaginationMeta,
   ProtocolBindingSummary,
+  ProtocolBindingSyncResult,
   ProtocolEntrySummary,
   UpdateProtocolBindingRequest,
   UpdateProtocolEntryRequest,
@@ -208,6 +209,11 @@ const entryFilters = reactive({
   binding_id: '',
 });
 
+const protocolOptions = ref<string[]>([]);
+const protocolOptionsLoading = ref(false);
+const protocolOptionsError = ref('');
+const fallbackProtocolOptions = ['vless', 'vmess', 'trojan', 'ss', 'hysteria'];
+
 const showCreateBindingModal = ref(false);
 const showEditBindingModal = ref(false);
 const showDeleteBindingModal = ref(false);
@@ -332,6 +338,9 @@ const entryTemplates = computed(() => [
   ...DEFAULT_ENTRY_TEMPLATES,
   ...customTemplates.value.entry,
 ]);
+const resolvedProtocolOptions = computed(() =>
+  protocolOptions.value.length ? protocolOptions.value : fallbackProtocolOptions,
+);
 
 const isAnyModalOpen = computed(
   () =>
@@ -406,6 +415,8 @@ function syncStatusLabel(value?: number): string {
       return '已同步';
     case 3:
       return '同步失败';
+    case 0:
+      return '未知';
     default:
       return '-';
   }
@@ -435,6 +446,8 @@ function healthStatusLabel(value?: number): string {
       return '异常';
     case 4:
       return '离线';
+    case 0:
+      return '未知';
     default:
       return '-';
   }
@@ -457,6 +470,35 @@ function parseTags(value: string): string[] {
 
 function stringifyTags(tags?: string[]): string {
   return (tags || []).join(', ');
+}
+
+function protocolLabel(value: string): string {
+  return value.toUpperCase();
+}
+
+function normalizeProtocols(protocols?: string[]): string[] {
+  if (!protocols?.length) {
+    return [];
+  }
+  const normalized = protocols
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return Array.from(new Set(normalized));
+}
+
+async function loadProtocolOptions() {
+  protocolOptionsLoading.value = true;
+  protocolOptionsError.value = '';
+
+  try {
+    const response = await adminApi.fetchAdminProtocols();
+    protocolOptions.value = normalizeProtocols(response.protocols);
+  } catch (error) {
+    protocolOptionsError.value =
+      error instanceof Error ? error.message : '加载协议列表失败';
+  } finally {
+    protocolOptionsLoading.value = false;
+  }
 }
 
 function parseProfileRequired(value: string): Record<string, unknown> {
@@ -815,21 +857,65 @@ function clearSelectedBindings() {
   selectedBindingIds.value = [];
 }
 
-function applySyncResults(results: Array<{ binding_id: number; status: number; synced_at?: number }>) {
+type SyncSummary = {
+  synced: number;
+  error: number;
+  skipped: number;
+};
+
+function summarizeSyncResults(results: ProtocolBindingSyncResult[]): SyncSummary {
+  return results.reduce(
+    (summary, result) => {
+      if (result.status === 1) {
+        summary.synced += 1;
+      } else if (result.status === 2) {
+        summary.error += 1;
+      } else if (result.status === 3) {
+        summary.skipped += 1;
+      }
+      return summary;
+    },
+    { synced: 0, error: 0, skipped: 0 },
+  );
+}
+
+function buildSyncSummaryMessage(summary: SyncSummary): string {
+  const parts: string[] = [];
+  if (summary.synced) {
+    parts.push(`已同步 ${summary.synced} 条`);
+  }
+  if (summary.skipped) {
+    parts.push(`已跳过 ${summary.skipped} 条`);
+  }
+  if (!parts.length) {
+    return '';
+  }
+  return `${parts.join('，')}。`;
+}
+
+function applySyncResults(results: ProtocolBindingSyncResult[]) {
   const resultMap = new Map(results.map((result) => [result.binding_id, result]));
   bindings.value = bindings.value.map((binding) => {
     const result = resultMap.get(binding.id);
     if (!result) {
       return binding;
     }
-    if (result.status !== 1 && result.status !== 2) {
-      return binding;
+    if (result.status === 1) {
+      return {
+        ...binding,
+        sync_status: 2,
+        last_synced_at: result.synced_at ?? binding.last_synced_at,
+        last_sync_error: undefined,
+      };
     }
-    return {
-      ...binding,
-      sync_status: result.status === 1 ? 2 : 3,
-      last_synced_at: result.synced_at ?? binding.last_synced_at,
-    };
+    if (result.status === 2) {
+      return {
+        ...binding,
+        sync_status: 3,
+        last_sync_error: result.message ?? binding.last_sync_error,
+      };
+    }
+    return binding;
   });
 }
 
@@ -1068,20 +1154,16 @@ async function handleSyncBinding(binding: ProtocolBindingSummary) {
 
   try {
     const result = await adminApi.syncAdminProtocolBinding(binding.id);
-    actionMessage.value = result.message || '同步已触发。';
-    bindings.value = bindings.value.map((item) => {
-      if (item.id !== binding.id) {
-        return item;
-      }
-      if (result.status !== 1 && result.status !== 2) {
-        return item;
-      }
-      return {
-        ...item,
-        sync_status: result.status === 1 ? 2 : 3,
-        last_synced_at: result.synced_at ?? item.last_synced_at,
-      };
-    });
+    applySyncResults([result]);
+    if (result.status === 1) {
+      actionMessage.value = result.message || '同步成功。';
+    } else if (result.status === 2) {
+      actionError.value = result.message || '同步失败，请检查节点控制面。';
+    } else if (result.status === 3) {
+      actionMessage.value = result.message || '同步已跳过。';
+    } else {
+      actionMessage.value = result.message || '同步已触发。';
+    }
   } catch (error) {
     actionError.value = '同步失败，请稍后重试。';
   } finally {
@@ -1100,22 +1182,26 @@ async function handleBatchSyncBindings() {
   actionError.value = '';
   batchSyncing.value = true;
 
-  try {
-    const response = await adminApi.syncAdminProtocolBindings({
-      binding_ids: selectedBindingIds.value,
-    });
-    const results = response.results ?? [];
-    if (!results.length) {
-      actionError.value = '未返回批量同步结果。';
-      return;
+    try {
+      const response = await adminApi.syncAdminProtocolBindings({
+        binding_ids: selectedBindingIds.value,
+      });
+      const results = response.results ?? [];
+      if (!results.length) {
+        actionError.value = '未返回同步结果。';
+        return;
+      }
+      applySyncResults(results);
+      const summary = summarizeSyncResults(results);
+      actionMessage.value = buildSyncSummaryMessage(summary);
+      if (summary.error) {
+        actionError.value = `同步失败 ${summary.error} 条，请检查节点控制面。`;
+      }
+    } catch (error) {
+      actionError.value = '批量同步失败，请稍后重试。';
+    } finally {
+      batchSyncing.value = false;
     }
-    applySyncResults(results);
-    actionMessage.value = `已触发批量同步（${results.length} 条）。`;
-  } catch (error) {
-    actionError.value = '批量同步失败，请稍后重试。';
-  } finally {
-    batchSyncing.value = false;
-  }
 }
 
 async function handleBatchSyncByNodes() {
@@ -1130,20 +1216,24 @@ async function handleBatchSyncByNodes() {
   actionError.value = '';
   batchSyncing.value = true;
 
-  try {
-    const response = await adminApi.syncAdminProtocolBindings({ node_ids: nodeIds });
-    const results = response.results ?? [];
-    if (!results.length) {
-      actionError.value = '未返回节点同步结果。';
-      return;
+    try {
+      const response = await adminApi.syncAdminProtocolBindings({ node_ids: nodeIds });
+      const results = response.results ?? [];
+      if (!results.length) {
+        actionError.value = '未返回同步结果。';
+        return;
+      }
+      applySyncResults(results);
+      const summary = summarizeSyncResults(results);
+      actionMessage.value = buildSyncSummaryMessage(summary);
+      if (summary.error) {
+        actionError.value = `同步失败 ${summary.error} 条，请检查节点控制面。`;
+      }
+    } catch (error) {
+      actionError.value = '节点同步失败，请稍后重试。';
+    } finally {
+      batchSyncing.value = false;
     }
-    applySyncResults(results);
-    actionMessage.value = `已按节点触发同步（${results.length} 条）。`;
-  } catch (error) {
-    actionError.value = '节点同步失败，请稍后重试。';
-  } finally {
-    batchSyncing.value = false;
-  }
 }
 
 async function handleCreateEntry() {
@@ -1275,6 +1365,7 @@ watch(activeTab, (value) => {
 });
 
 onMounted(() => {
+  void loadProtocolOptions();
   void loadBindings(true);
 });
 </script>
@@ -1326,10 +1417,14 @@ onMounted(() => {
       <AlertTitle>操作成功</AlertTitle>
       <AlertDescription>{{ actionMessage }}</AlertDescription>
     </Alert>
-    <Alert v-if="actionError && !isAnyModalOpen" variant="destructive">
-      <AlertTitle>操作失败</AlertTitle>
-      <AlertDescription>{{ actionError }}</AlertDescription>
-    </Alert>
+  <Alert v-if="actionError && !isAnyModalOpen" variant="destructive">
+    <AlertTitle>操作失败</AlertTitle>
+    <AlertDescription>{{ actionError }}</AlertDescription>
+  </Alert>
+  <Alert v-if="protocolOptionsError" variant="destructive">
+    <AlertTitle>协议列表加载失败</AlertTitle>
+    <AlertDescription>{{ protocolOptionsError }}</AlertDescription>
+  </Alert>
 
     <Card v-if="activeTab === 'bindings'" class="panel-card--full">
       <CardHeader class="cluster cluster--between cluster--center">
@@ -1341,15 +1436,24 @@ onMounted(() => {
           <Input v-model="bindingFilters.q" placeholder="搜索节点绑定名称或节点" class="w-56" />
           <Select v-model="bindingFilters.protocol">
             <SelectTrigger class="w-36">
-              <SelectValue placeholder="协议" />
+              <SelectValue :placeholder="protocolOptionsLoading ? '加载中...' : '协议'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">全部</SelectItem>
-              <SelectItem value="vless">VLESS</SelectItem>
-              <SelectItem value="vmess">VMess</SelectItem>
-              <SelectItem value="trojan">Trojan</SelectItem>
-              <SelectItem value="ss">Shadowsocks</SelectItem>
-              <SelectItem value="hysteria">Hysteria</SelectItem>
+              <SelectItem
+                v-for="protocol in resolvedProtocolOptions"
+                :key="`binding-${protocol}`"
+                :value="protocol"
+              >
+                {{ protocolLabel(protocol) }}
+              </SelectItem>
+              <SelectItem
+                v-if="!resolvedProtocolOptions.length && !protocolOptionsLoading"
+                disabled
+                value="__empty__"
+              >
+                暂无协议
+              </SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="bindingFilters.status">
@@ -1488,15 +1592,24 @@ onMounted(() => {
           <Input v-model="entryFilters.q" placeholder="搜索入口或节点" class="w-56" />
           <Select v-model="entryFilters.protocol">
             <SelectTrigger class="w-36">
-              <SelectValue placeholder="协议" />
+              <SelectValue :placeholder="protocolOptionsLoading ? '加载中...' : '协议'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">全部</SelectItem>
-              <SelectItem value="vless">VLESS</SelectItem>
-              <SelectItem value="vmess">VMess</SelectItem>
-              <SelectItem value="trojan">Trojan</SelectItem>
-              <SelectItem value="ss">Shadowsocks</SelectItem>
-              <SelectItem value="hysteria">Hysteria</SelectItem>
+              <SelectItem
+                v-for="protocol in resolvedProtocolOptions"
+                :key="`entry-${protocol}`"
+                :value="protocol"
+              >
+                {{ protocolLabel(protocol) }}
+              </SelectItem>
+              <SelectItem
+                v-if="!resolvedProtocolOptions.length && !protocolOptionsLoading"
+                disabled
+                value="__empty__"
+              >
+                暂无协议
+              </SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="entryFilters.status">
@@ -1627,7 +1740,12 @@ onMounted(() => {
           </div>
           <div>
             <Label for="binding-protocol">协议</Label>
-            <Input id="binding-protocol" v-model="createBindingForm.protocol" placeholder="vless" />
+            <Input
+              id="binding-protocol"
+              v-model="createBindingForm.protocol"
+              placeholder="vless"
+              list="protocol-options"
+            />
           </div>
           <div>
             <Label for="binding-role">角色</Label>
@@ -1719,7 +1837,7 @@ onMounted(() => {
           </div>
           <div>
             <Label for="binding-edit-protocol">协议</Label>
-            <Input id="binding-edit-protocol" v-model="editBindingForm.protocol" />
+            <Input id="binding-edit-protocol" v-model="editBindingForm.protocol" list="protocol-options" />
           </div>
           <div>
             <Label for="binding-edit-role">角色</Label>
@@ -1871,7 +1989,12 @@ onMounted(() => {
           </div>
           <div>
             <Label for="entry-protocol">协议</Label>
-            <Input id="entry-protocol" v-model="createEntryForm.protocol" placeholder="可选" />
+            <Input
+              id="entry-protocol"
+              v-model="createEntryForm.protocol"
+              placeholder="可选"
+              list="protocol-options"
+            />
           </div>
           <div>
             <Label for="entry-status">状态</Label>
@@ -1943,7 +2066,7 @@ onMounted(() => {
           </div>
           <div>
             <Label for="entry-edit-protocol">协议</Label>
-            <Input id="entry-edit-protocol" v-model="editEntryForm.protocol" />
+            <Input id="entry-edit-protocol" v-model="editEntryForm.protocol" list="protocol-options" />
           </div>
           <div>
             <Label for="entry-edit-status">状态</Label>
@@ -2006,5 +2129,9 @@ onMounted(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <datalist id="protocol-options">
+      <option v-for="protocol in resolvedProtocolOptions" :key="protocol" :value="protocol" />
+    </datalist>
   </section>
 </template>

@@ -27,24 +27,10 @@ import { formatBytes, formatDate, formatDateTime } from '../../../utils/format';
 import { userApi } from '../../../api';
 import type {
   PaginationMeta,
-  UserSubscriptionPreview,
   UserSubscriptionSummary,
   UserSubscriptionTrafficSummary,
   UserTrafficUsageRecord,
 } from '../../../api/types';
-
-type DiffRow = {
-  index: number;
-  current: string;
-  selected: string;
-  status: 'same' | 'added' | 'removed' | 'diff';
-};
-
-type DiffGroup = {
-  id: string;
-  type: 'same' | 'change';
-  rows: DiffRow[];
-};
 
 type LoadOptions = {
   syncUrl?: boolean;
@@ -91,23 +77,7 @@ if (queryFilters) {
 }
 
 const templateSelections = ref<Record<number, number>>({});
-const preview = ref<UserSubscriptionPreview | null>(null);
-const previewLoading = ref(false);
-const previewError = ref('');
-const previewActionMessage = ref('');
-const previewActionError = ref('');
-const previewTargetId = ref<number | null>(null);
 const confirmTarget = ref<UserSubscriptionSummary | null>(null);
-const downloadFormat = ref('auto');
-const compareLoading = ref(false);
-const compareError = ref('');
-const compareMessage = ref('');
-const compare = ref<{
-  subscriptionId: number;
-  current: UserSubscriptionPreview;
-  selected: UserSubscriptionPreview;
-} | null>(null);
-const toolTab = ref<'preview' | 'compare' | 'traffic'>('preview');
 const selectedSubscription = computed(() => {
   return (
     subscriptions.value.find(
@@ -166,29 +136,12 @@ const trafficLoading = ref(false);
 const trafficError = ref('');
 const trafficPage = ref(1);
 const trafficPagination = ref<PaginationMeta | null>(null);
-const trafficSubscriptionId = ref<number | null>(null);
 const trafficFilters = reactive({
   protocol: '',
   node_id: '',
   binding_id: '',
   from: '',
   to: '',
-});
-
-const isPreviewReady = computed(() => preview.value !== null && !previewLoading.value);
-const maxDiffLines = 200;
-const resolvedDownloadFormat = computed(() => {
-  if (downloadFormat.value !== 'auto') {
-    return downloadFormat.value;
-  }
-  const contentType = preview.value?.content_type ?? '';
-  if (contentType.includes('json')) {
-    return 'json';
-  }
-  if (contentType.includes('yaml') || contentType.includes('yml')) {
-    return 'yaml';
-  }
-  return 'txt';
 });
 
 const trafficRange = computed(() => {
@@ -206,122 +159,9 @@ const trafficRange = computed(() => {
     earliest: Math.min(...times),
   };
 });
-
-const compareLines = computed(() => {
-  if (!compare.value) {
-    return null;
-  }
-  return {
-    currentLines: compare.value.current.content.split('\n'),
-    selectedLines: compare.value.selected.content.split('\n'),
-  };
-});
-
-const diffCounts = computed(() => {
-  if (!compareLines.value) {
-    return null;
-  }
-
-  const { currentLines, selectedLines } = compareLines.value;
-  const total = Math.max(currentLines.length, selectedLines.length);
-  let same = 0;
-  let added = 0;
-  let removed = 0;
-  let changed = 0;
-
-  for (let i = 0; i < total; i += 1) {
-    const currentLine = currentLines[i];
-    const selectedLine = selectedLines[i];
-    if (currentLine === selectedLine) {
-      same += 1;
-    } else if (currentLine === undefined) {
-      added += 1;
-    } else if (selectedLine === undefined) {
-      removed += 1;
-    } else {
-      changed += 1;
-    }
-  }
-
-  return {
-    total,
-    same,
-    added,
-    removed,
-    changed,
-    truncated: total > maxDiffLines,
-  };
-});
-
-const diffRows = computed<DiffRow[]>(() => {
-  if (!compareLines.value) {
-    return [];
-  }
-
-  const { currentLines, selectedLines } = compareLines.value;
-  const total = Math.min(Math.max(currentLines.length, selectedLines.length), maxDiffLines);
-  const rows: DiffRow[] = [];
-
-  for (let i = 0; i < total; i += 1) {
-    const currentLine = currentLines[i] ?? '';
-    const selectedLine = selectedLines[i] ?? '';
-    let status: DiffRow['status'] = 'same';
-
-    if (currentLine === selectedLine) {
-      status = 'same';
-    } else if (!currentLine && selectedLine) {
-      status = 'added';
-    } else if (currentLine && !selectedLine) {
-      status = 'removed';
-    } else {
-      status = 'diff';
-    }
-
-    rows.push({
-      index: i + 1,
-      current: currentLine,
-      selected: selectedLine,
-      status,
-    });
-  }
-
-  return rows;
-});
-const compareView = ref<'all' | 'diffs'>('diffs');
-const collapsed = ref({
-  summary: false,
-  json: false,
-  diff: false,
-});
-const collapseThreshold = 6;
-const expandedGroups = ref<Record<string, boolean>>({});
-const isAllExpanded = ref(false);
 const filterSyncDelay = 400;
 let filterSyncTimer: number | null = null;
 const isApplyingQuery = ref(false);
-
-const diffGroups = computed<DiffGroup[]>(() => {
-  const rows = diffRows.value;
-  if (!rows.length) {
-    return [];
-  }
-
-  const groups: DiffGroup[] = [];
-  let currentGroup: DiffGroup | null = null;
-
-  rows.forEach((row) => {
-    const type: DiffGroup['type'] = row.status === 'same' ? 'same' : 'change';
-    if (!currentGroup || currentGroup.type !== type) {
-      const id = `${row.index}-${type}`;
-      currentGroup = { id, type, rows: [row] };
-      groups.push(currentGroup);
-      return;
-    }
-    currentGroup.rows.push(row);
-  });
-
-  return groups;
-});
 
 const totalPages = computed(() => {
   if (!pagination.value) {
@@ -502,98 +342,6 @@ function resetFilters() {
   void loadSubscriptions(1, { syncUrl: false });
 }
 
-const activeGroups = computed(() => {
-  if (compareView.value === 'diffs') {
-    return diffGroups.value.filter((group) => group.type === 'change');
-  }
-  return diffGroups.value;
-});
-
-function isGroupCollapsed(group: DiffGroup): boolean {
-  if (compareView.value !== 'all') {
-    return false;
-  }
-  if (group.type !== 'same') {
-    return false;
-  }
-  if (group.rows.length <= collapseThreshold) {
-    return false;
-  }
-  return !expandedGroups.value[group.id];
-}
-
-function toggleGroup(group: DiffGroup) {
-  if (group.type !== 'same') {
-    return;
-  }
-  expandedGroups.value = {
-    ...expandedGroups.value,
-    [group.id]: !expandedGroups.value[group.id],
-  };
-}
-
-function toggleAllGroups() {
-  const targetState = !isAllExpanded.value;
-  const updated: Record<string, boolean> = {};
-
-  diffGroups.value.forEach((group) => {
-    if (group.type !== 'same' || group.rows.length <= collapseThreshold) {
-      return;
-    }
-    updated[group.id] = targetState;
-  });
-
-  expandedGroups.value = updated;
-  isAllExpanded.value = targetState;
-}
-
-function groupLabel(group: DiffGroup): string {
-  const start = group.rows[0]?.index ?? 0;
-  const end = group.rows[group.rows.length - 1]?.index ?? start;
-  return `${group.rows.length} 行未变化（第 ${start}-${end} 行）`;
-}
-
-const jsonDiff = computed(() => {
-  if (!compare.value) {
-    return null;
-  }
-
-  const currentType = compare.value.current.content_type ?? '';
-  const selectedType = compare.value.selected.content_type ?? '';
-  if (!currentType.includes('json') || !selectedType.includes('json')) {
-    return null;
-  }
-
-  try {
-    const currentJson = JSON.parse(compare.value.current.content) as Record<string, unknown>;
-    const selectedJson = JSON.parse(compare.value.selected.content) as Record<string, unknown>;
-    const keys = new Set([...Object.keys(currentJson), ...Object.keys(selectedJson)]);
-    const added: string[] = [];
-    const removed: string[] = [];
-    const changed: string[] = [];
-
-    keys.forEach((key) => {
-      const currentValue = currentJson[key];
-      const selectedValue = selectedJson[key];
-      if (currentValue === undefined) {
-        added.push(key);
-        return;
-      }
-      if (selectedValue === undefined) {
-        removed.push(key);
-        return;
-      }
-      if (JSON.stringify(currentValue) !== JSON.stringify(selectedValue)) {
-        changed.push(key);
-      }
-    });
-
-    return { added, removed, changed };
-  } catch (error) {
-    return null;
-  }
-});
-
 function statusVariant(value?: number): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (value) {
     case 1:
@@ -659,17 +407,10 @@ function buildTemplateSelections(items: UserSubscriptionSummary[]) {
 async function loadSubscriptions(targetPage = 1, options: LoadOptions = {}) {
   loading.value = true;
   errorMessage.value = '';
-  compareError.value = '';
-  compareMessage.value = '';
-  compare.value = null;
-  expandedGroups.value = {};
-  isAllExpanded.value = false;
   const { syncUrl = true, historyMode = 'push', persist = true } = options;
   if (persist) {
     saveFilters();
   }
-  preview.value = null;
-  previewTargetId.value = null;
   page.value = targetPage;
   if (syncUrl) {
     updateQuery(targetPage, historyMode);
@@ -748,9 +489,6 @@ async function jumpToPage() {
   loading.value = true;
   errorMessage.value = '';
   saveFilters();
-  preview.value = null;
-  previewTargetId.value = null;
-  compare.value = null;
   page.value = clamped;
   updateQuery(clamped);
 
@@ -813,7 +551,6 @@ async function loadTraffic(targetPage = 1, mode: 'replace' | 'append' = 'replace
     trafficSummary.value = response.summary;
     trafficPagination.value = response.pagination ?? null;
     trafficPage.value = response.pagination?.page ?? targetPage;
-    trafficSubscriptionId.value = subscription.id;
     trafficRecords.value =
       mode === 'append'
         ? [...trafficRecords.value, ...(response.records ?? [])]
@@ -830,70 +567,6 @@ async function loadMoreTraffic() {
     return;
   }
   await loadTraffic(trafficPage.value + 1, 'append');
-}
-
-async function handlePreview(subscription: UserSubscriptionSummary) {
-  toolTab.value = 'preview';
-  previewLoading.value = true;
-  previewError.value = '';
-  previewActionError.value = '';
-  previewActionMessage.value = '';
-  preview.value = null;
-  previewTargetId.value = subscription.id;
-
-  const selectedTemplate = templateSelections.value[subscription.id] ?? subscription.template_id;
-
-  try {
-    preview.value = await userApi.fetchUserSubscriptionPreview(
-      subscription.id,
-      selectedTemplate,
-    );
-  } catch (error) {
-    previewError.value = error instanceof Error ? error.message : '加载预览失败';
-  } finally {
-    previewLoading.value = false;
-  }
-}
-
-async function handleCompare(subscription: UserSubscriptionSummary) {
-  toolTab.value = 'compare';
-  compareLoading.value = true;
-  compareError.value = '';
-  compareMessage.value = '';
-  compare.value = null;
-  expandedGroups.value = {};
-  isAllExpanded.value = false;
-
-  const currentTemplateId = subscription.template_id;
-  const selectedTemplateId = templateSelections.value[subscription.id] ?? currentTemplateId;
-
-  if (!currentTemplateId || !selectedTemplateId) {
-    compareError.value = '缺少模板信息，无法比较。';
-    compareLoading.value = false;
-    return;
-  }
-
-  if (currentTemplateId === selectedTemplateId) {
-    compareMessage.value = '所选模板与当前模板一致。';
-    compareLoading.value = false;
-    return;
-  }
-
-  try {
-    const [currentPreview, selectedPreview] = await Promise.all([
-      userApi.fetchUserSubscriptionPreview(subscription.id, currentTemplateId),
-      userApi.fetchUserSubscriptionPreview(subscription.id, selectedTemplateId),
-    ]);
-    compare.value = {
-      subscriptionId: subscription.id,
-      current: currentPreview,
-      selected: selectedPreview,
-    };
-  } catch (error) {
-    compareError.value = error instanceof Error ? error.message : '比较模板失败';
-  } finally {
-    compareLoading.value = false;
-  }
 }
 
 function openConfirm(subscription: UserSubscriptionSummary) {
@@ -927,8 +600,6 @@ async function applyTemplate() {
     );
     subscription.template_id = response.template_id;
     actionMessage.value = `已更新 ${subscription.name} 的模板。`;
-    compare.value = null;
-    compareMessage.value = '模板已更新，可再次比较查看差异。';
     confirmTarget.value = null;
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : '更新模板失败';
@@ -994,46 +665,6 @@ async function toggleQr() {
   }
 }
 
-async function copyPreview() {
-  if (!preview.value) {
-    return;
-  }
-
-  previewActionError.value = '';
-  previewActionMessage.value = '';
-
-  try {
-    await navigator.clipboard.writeText(preview.value.content);
-    previewActionMessage.value = '预览已复制到剪贴板。';
-  } catch (error) {
-    previewActionError.value = '复制预览失败。';
-  }
-}
-
-function downloadPreview() {
-  if (!preview.value) {
-    return;
-  }
-
-  previewActionError.value = '';
-  previewActionMessage.value = '';
-
-  try {
-    const blob = new Blob([preview.value.content], { type: preview.value.content_type });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `subscription-${preview.value.subscription_id}.${resolvedDownloadFormat.value}`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    previewActionMessage.value = '预览已下载。';
-  } catch (error) {
-    previewActionError.value = '下载预览失败。';
-  }
-}
-
 onMounted(() => {
   const initialPage = parsePageParam() ?? 1;
   void loadSubscriptions(initialPage, { syncUrl: false });
@@ -1071,23 +702,6 @@ watch(
   },
 );
 
-watch(
-  () => toolTab.value,
-  (value) => {
-    if (value !== 'traffic') {
-      return;
-    }
-    const subscription = selectedSubscription.value;
-    if (!subscription) {
-      return;
-    }
-    if (trafficSubscriptionId.value === subscription.id && trafficPagination.value) {
-      return;
-    }
-    void loadTraffic(1);
-  },
-);
-
 onBeforeUnmount(() => {
   if (filterSyncTimer !== null) {
     window.clearTimeout(filterSyncTimer);
@@ -1095,21 +709,11 @@ onBeforeUnmount(() => {
 });
 
 watch(selectedSubscriptionId, () => {
-  preview.value = null;
-  previewTargetId.value = null;
-  previewError.value = '';
-  previewActionError.value = '';
-  previewActionMessage.value = '';
-  compare.value = null;
-  compareError.value = '';
-  compareMessage.value = '';
-  toolTab.value = 'preview';
   trafficSummary.value = null;
   trafficRecords.value = [];
   trafficPagination.value = null;
   trafficPage.value = 1;
   trafficError.value = '';
-  trafficSubscriptionId.value = null;
   detailMessage.value = '';
   detailError.value = '';
   showQr.value = false;
@@ -1125,7 +729,7 @@ watch(selectedSubscriptionId, () => {
       <div>
         <p class="page__eyebrow">订阅</p>
         <h3 class="page-section__title">订阅管理</h3>
-        <p class="page__subtitle">管理模板并预览订阅内容。</p>
+        <p class="page__subtitle">管理模板并复制订阅地址进行导入。</p>
       </div>
       <div class="page-section__actions">
         <Button variant="secondary" type="button" @click="loadSubscriptions" :disabled="loading">
@@ -1202,7 +806,7 @@ watch(selectedSubscriptionId, () => {
     <Card class="panel-card--full">
       <CardHeader>
         <CardTitle>订阅使用指引</CardTitle>
-        <p class="panel-card__meta">按步骤完成模板切换与预览。</p>
+        <p class="panel-card__meta">按步骤完成模板切换与导入。</p>
       </CardHeader>
       <CardContent>
         <div class="step-grid">
@@ -1212,11 +816,11 @@ watch(selectedSubscriptionId, () => {
           </div>
           <div class="step-card">
             <p class="step-card__title">2. 选择模板</p>
-            <p class="step-card__desc">切换模板并查看差异，确认后应用。</p>
+            <p class="step-card__desc">选择合适模板，确认后应用。</p>
           </div>
           <div class="step-card">
-            <p class="step-card__title">3. 预览/比较</p>
-            <p class="step-card__desc">查看预览内容，必要时下载或复制。</p>
+            <p class="step-card__title">3. 导入客户端</p>
+            <p class="step-card__desc">复制订阅地址或二维码，在客户端中导入。</p>
           </div>
         </div>
       </CardContent>
@@ -1285,12 +889,6 @@ watch(selectedSubscriptionId, () => {
                   </p>
                 </div>
                 <div class="cluster">
-                  <Button variant="ghost" size="sm" type="button" @click="handlePreview(subscription)">
-                    预览
-                  </Button>
-                  <Button variant="ghost" size="sm" type="button" @click="handleCompare(subscription)">
-                    比较
-                  </Button>
                   <Button
                     size="sm"
                     type="button"
@@ -1395,7 +993,7 @@ watch(selectedSubscriptionId, () => {
             </div>
           </div>
           <p v-else class="text-xs text-muted-foreground">
-            订阅地址未配置，可使用订阅预览下载内容或联系管理员轮转凭证。
+            订阅地址未配置，请联系管理员轮转凭证或稍后重试。
           </p>
           <div v-if="hasSubscriptionUrl" class="cluster cluster--center">
             <Button
@@ -1438,24 +1036,6 @@ watch(selectedSubscriptionId, () => {
           </Alert>
           <div class="cluster cluster--center">
             <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              @click="handlePreview(selectedSubscription)"
-              :disabled="previewLoading"
-            >
-              生成预览
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              @click="handleCompare(selectedSubscription)"
-              :disabled="compareLoading"
-            >
-              比较模板
-            </Button>
-            <Button
               size="sm"
               type="button"
               :disabled="
@@ -1473,258 +1053,6 @@ watch(selectedSubscriptionId, () => {
     </Card>
 
     <Card>
-      <CardHeader class="cluster cluster--between cluster--start cluster--wide">
-        <div>
-          <CardTitle>订阅工具</CardTitle>
-          <p class="panel-card__meta">选择预览、比较或流量视图。</p>
-        </div>
-        <div class="cluster cluster--center">
-          <Button
-            size="sm"
-            :variant="toolTab === 'preview' ? 'default' : 'secondary'"
-            type="button"
-            @click="toolTab = 'preview'"
-          >
-            预览
-          </Button>
-          <Button
-            size="sm"
-            :variant="toolTab === 'compare' ? 'default' : 'secondary'"
-            type="button"
-            @click="toolTab = 'compare'"
-          >
-            比较
-          </Button>
-          <Button
-            size="sm"
-            :variant="toolTab === 'traffic' ? 'default' : 'secondary'"
-            type="button"
-            @click="toolTab = 'traffic'"
-          >
-            流量
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p class="text-sm text-muted-foreground">
-          {{ toolTab === 'preview'
-            ? '预览当前模板内容，支持复制与下载。'
-            : toolTab === 'compare'
-              ? '比较当前模板与所选模板的差异。'
-              : '查看订阅流量明细与计费汇总。' }}
-        </p>
-      </CardContent>
-    </Card>
-
-    <Card v-if="toolTab === 'preview'">
-      <CardHeader>
-        <CardTitle>订阅预览</CardTitle>
-        <p class="panel-card__meta">
-          {{ previewTargetId ? `订阅 #${previewTargetId}` : '请选择订阅' }}
-        </p>
-      </CardHeader>
-      <CardContent>
-        <p v-if="previewLoading" class="panel-card__empty">正在生成预览...</p>
-        <p v-else-if="previewError" class="panel-card__empty">{{ previewError }}</p>
-        <p v-else-if="!preview" class="panel-card__empty">请选择订阅以加载预览。</p>
-        <div v-else class="stack">
-          <div class="cluster">
-            <Badge variant="outline">模板 #{{ preview.template_id }}</Badge>
-            <Badge variant="secondary">{{ preview.content_type }}</Badge>
-            <Badge variant="outline">ETag {{ preview.etag }}</Badge>
-            <Badge variant="outline">{{ formatDateTime(preview.generated_at) }}</Badge>
-          </div>
-          <div class="cluster cluster--center">
-            <div class="cluster cluster--center">
-              <Label>下载格式</Label>
-              <Select v-model="downloadFormat">
-                <SelectTrigger>
-                  <SelectValue placeholder="选择格式" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">自动</SelectItem>
-                  <SelectItem value="txt">TXT</SelectItem>
-                  <SelectItem value="yaml">YAML</SelectItem>
-                  <SelectItem value="json">JSON</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button variant="ghost" type="button" @click="copyPreview" :disabled="!isPreviewReady">
-              复制
-            </Button>
-            <Button variant="ghost" type="button" @click="downloadPreview" :disabled="!isPreviewReady">
-              下载
-            </Button>
-          </div>
-          <Alert v-if="previewActionMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
-            <AlertTitle>操作成功</AlertTitle>
-            <AlertDescription>{{ previewActionMessage }}</AlertDescription>
-          </Alert>
-          <Alert v-if="previewActionError" variant="destructive">
-            <AlertTitle>操作失败</AlertTitle>
-            <AlertDescription>{{ previewActionError }}</AlertDescription>
-          </Alert>
-          <pre class="preview__content">{{ preview.content }}</pre>
-        </div>
-      </CardContent>
-    </Card>
-
-    <Card v-else-if="toolTab === 'compare'">
-      <CardHeader class="cluster cluster--between cluster--start cluster--wide">
-        <div>
-          <CardTitle>模板比较</CardTitle>
-          <p class="panel-card__meta">当前模板与所选模板差异</p>
-        </div>
-        <div class="cluster cluster--center">
-          <Label>视图</Label>
-          <Select v-model="compareView">
-            <SelectTrigger>
-              <SelectValue placeholder="选择视图" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="diffs">仅差异</SelectItem>
-              <SelectItem value="all">全部行</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p v-if="compareLoading" class="panel-card__empty">正在比较模板...</p>
-        <p v-else-if="compareError" class="panel-card__empty">{{ compareError }}</p>
-        <p v-else-if="compareMessage" class="panel-card__empty">{{ compareMessage }}</p>
-        <p v-else-if="!compare" class="panel-card__empty">请选择订阅并点击比较。</p>
-        <div v-else class="compare">
-          <Button variant="ghost" size="sm" class="collapse-toggle" type="button" @click="collapsed.summary = !collapsed.summary">
-            <span>{{ collapsed.summary ? '显示摘要' : '隐藏摘要' }}</span>
-            <span class="collapse-toggle__icon">{{ collapsed.summary ? '+' : '?' }}</span>
-          </Button>
-          <div v-if="!collapsed.summary" class="compare-summary">
-            <div class="compare-summary__item">
-              <p class="compare-summary__label">当前</p>
-              <p class="compare-summary__value">模板 #{{ compare.current.template_id }}</p>
-            </div>
-            <div class="compare-summary__item">
-              <p class="compare-summary__label">所选</p>
-              <p class="compare-summary__value">模板 #{{ compare.selected.template_id }}</p>
-            </div>
-            <div v-if="diffCounts" class="compare-summary__item">
-              <p class="compare-summary__label">行数</p>
-              <p class="compare-summary__value">
-                {{ diffCounts.total }} 总计 · {{ diffCounts.changed }} 变更 ·
-                {{ diffCounts.added }} 新增 · {{ diffCounts.removed }} 删除
-              </p>
-            </div>
-          </div>
-          <p v-if="diffCounts?.truncated" class="text-xs text-muted-foreground">
-            对比最多展示 {{ maxDiffLines }} 行。
-          </p>
-          <Button
-            v-if="jsonDiff"
-            variant="ghost"
-            size="sm"
-            class="collapse-toggle"
-            type="button"
-            @click="collapsed.json = !collapsed.json"
-          >
-            <span>{{ collapsed.json ? '显示 JSON 字段变化' : '隐藏 JSON 字段变化' }}</span>
-            <span class="collapse-toggle__icon">{{ collapsed.json ? '+' : '?' }}</span>
-          </Button>
-          <div v-if="jsonDiff && !collapsed.json" class="compare-summary compare-summary--stack">
-            <div v-if="jsonDiff.added.length" class="compare-summary__item">
-              <p class="compare-summary__label">新增字段</p>
-              <p class="compare-summary__value">{{ jsonDiff.added.join(', ') }}</p>
-            </div>
-            <div v-if="jsonDiff.removed.length" class="compare-summary__item">
-              <p class="compare-summary__label">移除字段</p>
-              <p class="compare-summary__value">{{ jsonDiff.removed.join(', ') }}</p>
-            </div>
-            <div v-if="jsonDiff.changed.length" class="compare-summary__item">
-              <p class="compare-summary__label">变更字段</p>
-              <p class="compare-summary__value">{{ jsonDiff.changed.join(', ') }}</p>
-            </div>
-          </div>
-          <div class="compare-toolbar">
-            <Button variant="ghost" size="sm" class="collapse-toggle" type="button" @click="collapsed.diff = !collapsed.diff">
-              <span>{{ collapsed.diff ? '显示差异' : '隐藏差异' }}</span>
-              <span class="collapse-toggle__icon">{{ collapsed.diff ? '+' : '?' }}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              :disabled="compareView !== 'all'"
-              @click="toggleAllGroups"
-            >
-              {{ isAllExpanded ? '折叠相同行' : '展开全部' }}
-            </Button>
-          </div>
-          <div v-if="!collapsed.diff" class="compare-grid">
-            <div class="compare-column">
-              <h4>当前</h4>
-              <div class="compare-code">
-                <template v-for="group in activeGroups" :key="`current-${group.id}`">
-                  <Button
-                    v-if="isGroupCollapsed(group)"
-                    variant="ghost"
-                    size="sm"
-                    class="diff-placeholder"
-                    type="button"
-                    @click="toggleGroup(group)"
-                  >
-                    {{ groupLabel(group) }} · 点击展开
-                  </Button>
-                  <template v-else>
-                    <div
-                      v-for="row in group.rows"
-                      :key="`current-${row.index}`"
-                      :class="['diff-line', `diff-line--${row.status}`]"
-                    >
-                      <span class="diff-line__index">{{ row.index }}</span>
-                      <span class="diff-line__text">{{ row.current }}</span>
-                    </div>
-                  </template>
-                </template>
-                <div v-if="activeGroups.length === 0" class="panel-card__empty">
-                  未发现差异。
-                </div>
-              </div>
-            </div>
-            <div class="compare-column">
-              <h4>所选</h4>
-              <div class="compare-code">
-                <template v-for="group in activeGroups" :key="`selected-${group.id}`">
-                  <Button
-                    v-if="isGroupCollapsed(group)"
-                    variant="ghost"
-                    size="sm"
-                    class="diff-placeholder"
-                    type="button"
-                    @click="toggleGroup(group)"
-                  >
-                    {{ groupLabel(group) }} · 点击展开
-                  </Button>
-                  <template v-else>
-                    <div
-                      v-for="row in group.rows"
-                      :key="`selected-${row.index}`"
-                      :class="['diff-line', `diff-line--${row.status}`]"
-                    >
-                      <span class="diff-line__index">{{ row.index }}</span>
-                      <span class="diff-line__text">{{ row.selected }}</span>
-                    </div>
-                  </template>
-                </template>
-                <div v-if="activeGroups.length === 0" class="panel-card__empty">
-                  未发现差异。
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-
-    <Card v-else>
       <CardHeader class="cluster cluster--between cluster--start cluster--wide">
         <div>
           <CardTitle>流量明细</CardTitle>

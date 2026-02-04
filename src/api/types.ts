@@ -744,6 +744,10 @@ export type SubscriptionTemplateClientsResponse = {
   clients: SubscriptionTemplateClient[];
 };
 
+export type AdminProtocolsResponse = {
+  protocols: string[];
+};
+
 export type CreateTemplateRequest = {
   name: string;
   description?: string;
@@ -1075,15 +1079,6 @@ export type UserBalanceResponse = {
   updated_at: number;
   transactions: BalanceTransactionSummary[];
   pagination: PaginationMeta;
-};
-
-export type UserSubscriptionPreview = {
-  subscription_id: number;
-  template_id: number;
-  content: string;
-  content_type: string;
-  etag: string;
-  generated_at: number;
 };
 
 export type UserSubscriptionTemplateUpdate = {

@@ -1,6 +1,6 @@
 import { buildUrl } from './url';
 import { authPath } from './paths';
-import { parseErrorResponse } from './error';
+import { errorFallbackForStatus, errorTitleForStatus, parseErrorResponse } from './error';
 import {
   getRefreshToken,
   setAccessToken,
@@ -76,9 +76,19 @@ function applyTokens(tokens: AuthTokens): void {
   }
 }
 
-async function failWithToast(response: Response, fallback: string): Promise<Error> {
+type FailToastOptions = {
+  title?: string;
+  fallback?: string;
+};
+
+async function failWithToast(response: Response, options: FailToastOptions = {}): Promise<Error> {
+  const fallback = options.fallback ?? errorFallbackForStatus(response.status);
   const message = await parseErrorResponse(response, fallback);
-  pushToast({ title: '操作失败', description: message, variant: 'error' });
+  pushToast({
+    title: options.title ?? errorTitleForStatus(response.status),
+    description: message,
+    variant: 'error',
+  });
   return new Error(message);
 }
 
@@ -92,7 +102,10 @@ export async function login(email: string, password: string): Promise<AuthTokens
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Login failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '登录失败',
+      fallback: '登录失败，请检查账号或密码后重试。',
+    });
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -117,7 +130,10 @@ export async function refreshTokens(): Promise<AuthTokens> {
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Refresh failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '登录已失效',
+      fallback: '登录已失效，请重新登录。',
+    });
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -142,7 +158,10 @@ export async function registerAccount(payload: RegisterRequest): Promise<Registe
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Register failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '注册失败',
+      fallback: '注册失败，请检查填写内容后重试。',
+    });
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -165,7 +184,10 @@ export async function verifyEmail(payload: VerifyRequest): Promise<AuthTokens> {
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Verify failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '验证失败',
+      fallback: '验证失败，请确认验证码后重试。',
+    });
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -184,7 +206,10 @@ export async function requestPasswordReset(payload: ForgotPasswordRequest): Prom
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Reset request failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '发送验证码失败',
+      fallback: '验证码发送失败，请稍后重试。',
+    });
   }
 
   return (await response.json()) as MessageResponse;
@@ -200,7 +225,10 @@ export async function resetPassword(payload: ResetPasswordRequest): Promise<Mess
   });
 
   if (!response.ok) {
-    throw await failWithToast(response, `Password reset failed (${response.status})`);
+    throw await failWithToast(response, {
+      title: '重置密码失败',
+      fallback: '重置密码失败，请稍后重试。',
+    });
   }
 
   return (await response.json()) as MessageResponse;

@@ -743,36 +743,6 @@ export async function mockFetch(url: string, options: RequestInit = {}): Promise
     }
   }
 
-  if (matchPath(url, `${API_PREFIX}/user/subscriptions/{id}/preview`)) {
-    if (method === 'GET' && currentUser) {
-      const id = extractId(url, `${API_PREFIX}/user/subscriptions/{id}/preview`);
-      const parsedUrl = parseUrl(url);
-      const templateIdParam = parsedUrl?.searchParams.get('template_id');
-      const templateId = templateIdParam ? Number(templateIdParam) : undefined;
-      const selectedTemplate = mockTemplates.find((template) => template.id === templateId);
-      const fallbackTemplate =
-        mockTemplates.find((template) => template.is_default) ?? mockTemplates[0];
-      const targetTemplate = selectedTemplate ?? fallbackTemplate;
-      const format = targetTemplate?.format ?? 'text';
-      const contentType =
-        format === 'yaml'
-          ? 'text/yaml'
-          : format === 'json'
-            ? 'application/json'
-            : 'text/plain';
-      const resolvedTemplateId = targetTemplate?.id ?? templateId ?? 0;
-
-      return mockResponse({
-        subscription_id: id,
-        template_id: resolvedTemplateId,
-        content: targetTemplate?.content ?? `# Mock subscription ${id}\n# Template ${resolvedTemplateId}\n`,
-        content_type: contentType,
-        etag: `mock-${id}-${resolvedTemplateId}-${Date.now()}`,
-        generated_at: Date.now(),
-      });
-    }
-  }
-
   if (matchPath(url, `${API_PREFIX}/user/subscriptions/{id}/template`)) {
     if (method === 'POST' && currentUser) {
       const id = extractId(url, `${API_PREFIX}/user/subscriptions/{id}/template`);

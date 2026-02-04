@@ -39,7 +39,9 @@ function pruneRecent(now: number) {
 
 export function pushToast(payload: ToastPayload) {
   const variant = payload.variant ?? 'info';
-  const title = payload.title?.trim() || (variant === 'error' ? '操作失败' : '提示');
+  const title =
+    payload.title?.trim() ||
+    (variant === 'error' ? '操作失败' : variant === 'success' ? '操作成功' : '提示');
   const description = payload.description?.trim();
   const duration = payload.duration ?? DEFAULT_DURATION;
   const key = `${variant}:${title}:${description ?? ''}`;

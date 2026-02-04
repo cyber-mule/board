@@ -17,7 +17,7 @@
 - 下单：已完成（创建订单已接通，`UserPlansPage.vue` + `src/api/user/index.ts`）
 - 支付流程：已完成（支付通道选择/支付入口/二维码/状态刷新/取消/失败提示/线下支付提示，`UserPlansPage.vue` + `UserOrdersPage.vue`）
 - 获取订阅地址：已完成（订阅详情展示地址/Token/二维码，`UserSubscriptionsPage.vue`）
-- 查看订阅：已完成（列表/详情/模板切换/预览/下载，`UserSubscriptionsPage.vue`）
+- 查看订阅：已完成（列表/详情/模板切换/复制/二维码唤起，`UserSubscriptionsPage.vue`）
 - 查看余额：已完成（余额总览 + 明细筛选页，`UserDashboard.vue` + `UserBalancePage.vue`）
 - 查看公告：已完成（`UserAnnouncementsPage.vue`）
 

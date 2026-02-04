@@ -287,7 +287,7 @@ watch(
               </div>
             </div>
             <div v-if="selectedAnnouncement.content" class="rich-text-content" v-html="sanitizedContent" />
-            <div v-else class="preview__content">暂无公告内容。</div>
+            <div v-else class="content-box">暂无公告内容。</div>
           </div>
         </CardContent>
       </Card>

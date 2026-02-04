@@ -21,7 +21,6 @@ import type {
   UserNodesResponse,
   UserPlanSummary,
   UserProfileResponse,
-  UserSubscriptionPreview,
   UserSubscriptionSummary,
   UserSubscriptionTemplateUpdate,
   UserSubscriptionTrafficResponse,
@@ -152,13 +151,6 @@ export function updateUserEmail(payload: UpdateUserEmailRequest) {
     method: 'POST',
     json: payload,
   });
-}
-
-export function fetchUserSubscriptionPreview(id: number, templateId?: number) {
-  const query = templateId ? { template_id: templateId } : {};
-  return requestJson<UserSubscriptionPreview>(
-    withQuery(userPath(`/subscriptions/${id}/preview`), query),
-  );
 }
 
 export function fetchUserSubscriptionTraffic(id: number, query: UserSubscriptionTrafficQuery = {}) {

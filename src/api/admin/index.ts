@@ -40,6 +40,7 @@ import type {
   AdminSubscriptionSummary,
   SubscriptionTemplateClientsResponse,
   SubscriptionTemplateSummary,
+  AdminProtocolsResponse,
   SyncNodeKernelsResponse,
   TemplateHistoryResponse,
   UpdateAnnouncementRequest,
@@ -561,6 +562,10 @@ export function fetchAdminTemplateClients(query: AdminTemplateClientsQuery = {})
   return requestJson<SubscriptionTemplateClientsResponse>(
     withQuery(adminPath('/subscription-templates/clients'), query),
   );
+}
+
+export function fetchAdminProtocols() {
+  return requestJson<AdminProtocolsResponse>(adminPath('/protocols'));
 }
 
 export function createAdminTemplate(payload: CreateTemplateRequest) {

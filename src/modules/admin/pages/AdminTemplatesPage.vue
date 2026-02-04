@@ -253,7 +253,14 @@ async function handleUpdate() {
   errorMessage.value = '';
 
   try {
-    await adminApi.updateAdminTemplate(selectedTemplate.value.id, editForm);
+    const payload: UpdateTemplateRequest = {
+      name: editForm.name,
+      description: editForm.description,
+      format: editForm.format,
+      content: editForm.content,
+      is_default: editForm.is_default,
+    };
+    await adminApi.updateAdminTemplate(selectedTemplate.value.id, payload);
     closeEditModal();
     await loadTemplates();
   } catch (error) {

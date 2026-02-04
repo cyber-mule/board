@@ -68,6 +68,51 @@ function statusLabel(value?: number) {
   }
 }
 
+function healthStatusVariant(value?: number): 'default' | 'secondary' | 'destructive' | 'outline' {
+  switch (value) {
+    case 1:
+      return 'default';
+    case 2:
+      return 'secondary';
+    case 3:
+    case 4:
+      return 'destructive';
+    default:
+      return 'outline';
+  }
+}
+
+function healthStatusLabel(value?: number) {
+  switch (value) {
+    case 1:
+      return '健康';
+    case 2:
+      return '退化';
+    case 3:
+      return '异常';
+    case 4:
+      return '离线';
+    case 0:
+      return '未知';
+    default:
+      return '未知';
+  }
+}
+
+function protocolStatusVariant(status?: number, healthStatus?: number) {
+  if (typeof healthStatus === 'number') {
+    return healthStatusVariant(healthStatus);
+  }
+  return statusVariant(status);
+}
+
+function protocolStatusLabel(status?: number, healthStatus?: number) {
+  if (typeof healthStatus === 'number') {
+    return healthStatusLabel(healthStatus);
+  }
+  return statusLabel(status);
+}
+
 async function loadNodes(reset = true) {
   if (reset) {
     loading.value = true;
@@ -192,9 +237,9 @@ onMounted(() => {
                   <Badge
                     v-for="item in node.protocol_statuses || []"
                     :key="`${node.id}-${item.binding_id}`"
-                    variant="secondary"
+                    :variant="protocolStatusVariant(item.status, item.health_status)"
                   >
-                    {{ item.protocol }} · {{ item.health_status || item.status }}
+                    {{ item.protocol }} · {{ protocolStatusLabel(item.status, item.health_status) }}
                   </Badge>
                   <span v-if="!node.protocol_statuses?.length" class="text-xs text-muted-foreground">无协议</span>
                 </div>

@@ -4,7 +4,7 @@ import { refreshTokens } from './auth';
 import { buildUrl } from './url';
 import { ensureLeadingSlash } from '../utils/path';
 import { USE_MOCK, mockFetch } from '../mock';
-import { parseErrorMessage } from './error';
+import { errorFallbackForStatus, errorTitleForStatus, parseErrorMessage } from './error';
 import { pushToast } from '../lib/toast';
 
 type RequestOptions = {
@@ -15,6 +15,9 @@ type RequestOptions = {
   auth?: boolean;
   toastOnError?: boolean;
   toastTitle?: string;
+  toastOnSuccess?: boolean;
+  toastSuccessTitle?: string;
+  toastSuccessDescription?: string;
 };
 
 let refreshPromise: Promise<void> | null = null;
@@ -49,6 +52,67 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return (await response.text()) as T;
 }
 
+const TRIVIAL_SUCCESS_MESSAGES = new Set([
+  'ok',
+  'okay',
+  'success',
+  'successful',
+  'succeeded',
+  'done',
+  '完成',
+  '成功',
+  '操作成功',
+]);
+
+const GENERIC_NETWORK_MESSAGES = ['failed to fetch', 'networkerror', 'network request failed'];
+
+function extractResponseMessage(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+
+  const candidate = (data as { message?: unknown }).message;
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
+function normalizeSuccessMessage(message?: string): string | undefined {
+  if (!message) {
+    return undefined;
+  }
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const lower = trimmed.toLowerCase();
+  if (TRIVIAL_SUCCESS_MESSAGES.has(lower) || TRIVIAL_SUCCESS_MESSAGES.has(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function normalizeNetworkMessage(message: string | undefined, fallback: string): string {
+  if (!message) {
+    return fallback;
+  }
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const lower = trimmed.toLowerCase();
+  if (GENERIC_NETWORK_MESSAGES.some((fragment) => lower.includes(fragment))) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function shouldToastSuccess(method: string | undefined, options: RequestOptions): boolean {
+  if (options.toastOnSuccess !== undefined) {
+    return options.toastOnSuccess;
+  }
+  const normalized = (method ?? 'GET').toUpperCase();
+  return normalized !== 'GET' && normalized !== 'HEAD';
+}
+
 export async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const payload = options.json !== undefined ? JSON.stringify(options.json) : options.body;
@@ -57,10 +121,7 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     const errorText = await response.text().catch(() => '');
     const message = parseErrorMessage(errorText, fallback);
     if (options.toastOnError !== false) {
-      const status = response.status;
-      const title =
-        options.toastTitle ??
-        (status === 401 || status === 403 ? '无权限访问' : status >= 500 ? '服务异常' : '操作失败');
+      const title = options.toastTitle ?? errorTitleForStatus(response.status);
       pushToast({
         title,
         description: message,
@@ -71,7 +132,8 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
   }
 
   function buildNetworkError(error: unknown, fallback: string): Error {
-    const message = error instanceof Error ? error.message : fallback;
+    const rawMessage = error instanceof Error ? error.message : undefined;
+    const message = normalizeNetworkMessage(rawMessage, fallback);
     if (options.toastOnError !== false) {
       pushToast({
         title: options.toastTitle ?? '网络异常',
@@ -122,10 +184,20 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     });
 
     if (!response.ok) {
-      throw await buildError(response, `Request failed (${response.status})`);
+      throw await buildError(response, errorFallbackForStatus(response.status));
     }
 
-    return handleResponse<T>(response);
+    const data = await handleResponse<T>(response);
+    if (shouldToastSuccess(options.method, options)) {
+      const message = normalizeSuccessMessage(extractResponseMessage(data));
+      const description = options.toastSuccessDescription ?? message;
+      pushToast({
+        title: options.toastSuccessTitle ?? '操作成功',
+        description,
+        variant: 'success',
+      });
+    }
+    return data;
   }
 
   let response: Response;
@@ -136,7 +208,7 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
       body: payload ?? undefined,
     });
   } catch (error) {
-    throw buildNetworkError(error, '无法连接服务器');
+    throw buildNetworkError(error, '无法连接服务器，请检查网络或稍后再试。');
   }
 
   if (response.status === 401 && options.auth !== false && !isAuthRequest(path)) {
@@ -169,20 +241,40 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
         body: payload ?? undefined,
       });
     } catch (error) {
-      throw buildNetworkError(error, '无法连接服务器');
+      throw buildNetworkError(error, '无法连接服务器，请检查网络或稍后再试。');
     }
 
     if (retryResponse.ok) {
-      return handleResponse<T>(retryResponse);
+      const data = await handleResponse<T>(retryResponse);
+      if (shouldToastSuccess(options.method, options)) {
+        const message = normalizeSuccessMessage(extractResponseMessage(data));
+        const description = options.toastSuccessDescription ?? message;
+        pushToast({
+          title: options.toastSuccessTitle ?? '操作成功',
+          description,
+          variant: 'success',
+        });
+      }
+      return data;
     }
 
-    throw await buildError(retryResponse, `Request failed (${retryResponse.status})`);
+    throw await buildError(retryResponse, errorFallbackForStatus(retryResponse.status));
   }
 
   if (!response.ok) {
-    throw await buildError(response, `Request failed (${response.status})`);
+    throw await buildError(response, errorFallbackForStatus(response.status));
   }
 
-  return handleResponse<T>(response);
+  const data = await handleResponse<T>(response);
+  if (shouldToastSuccess(options.method, options)) {
+    const message = normalizeSuccessMessage(extractResponseMessage(data));
+    const description = options.toastSuccessDescription ?? message;
+    pushToast({
+      title: options.toastSuccessTitle ?? '操作成功',
+      description,
+      variant: 'success',
+    });
+  }
+  return data;
 }
 
