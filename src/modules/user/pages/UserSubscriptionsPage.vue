@@ -828,6 +828,70 @@ watch(selectedSubscriptionId, () => {
 
     <Card>
       <CardHeader>
+        <CardTitle>导入客户端</CardTitle>
+        <p class="panel-card__meta">复制订阅地址或二维码导入客户端。</p>
+      </CardHeader>
+      <CardContent>
+        <p v-if="loading" class="panel-card__empty">正在加载订阅...</p>
+        <p v-else-if="!selectedSubscription" class="panel-card__empty">请选择订阅查看导入信息。</p>
+        <div v-else class="stack">
+          <div class="stack stack--tight">
+            <Label>订阅地址</Label>
+            <Input
+              :model-value="subscriptionUrl"
+              readonly
+              class="font-mono text-xs"
+              placeholder="订阅地址未生成"
+            />
+          </div>
+          <p v-if="!hasSubscriptionUrl" class="text-xs text-muted-foreground">
+            订阅地址未配置，请联系管理员轮转凭证或稍后重试。
+          </p>
+          <div class="cluster cluster--center">
+            <Button
+              size="sm"
+              variant="secondary"
+              type="button"
+              :disabled="!subscriptionUrl"
+              @click="copyDetail('订阅地址', subscriptionUrl)"
+            >
+              复制地址
+            </Button>
+            <Button
+              v-if="subscriptionUrl"
+              size="sm"
+              variant="ghost"
+              type="button"
+              :as="'a'"
+              :href="subscriptionUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              打开链接
+            </Button>
+            <Button size="sm" variant="ghost" type="button" :disabled="!subscriptionUrl" @click="toggleQr">
+              {{ showQr ? '隐藏二维码' : '生成二维码' }}
+            </Button>
+          </div>
+          <div v-if="hasSubscriptionUrl && showQr" class="qr-panel">
+            <p v-if="qrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
+            <img v-else-if="qrCodeUrl" :src="qrCodeUrl" alt="订阅二维码" class="qr-image" />
+            <p v-else class="text-xs text-muted-foreground">{{ qrError || '二维码不可用。' }}</p>
+          </div>
+          <Alert v-if="detailMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
+            <AlertTitle>操作成功</AlertTitle>
+            <AlertDescription>{{ detailMessage }}</AlertDescription>
+          </Alert>
+          <Alert v-if="detailError" variant="destructive">
+            <AlertTitle>操作失败</AlertTitle>
+            <AlertDescription>{{ detailError }}</AlertDescription>
+          </Alert>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
         <CardTitle>订阅列表</CardTitle>
         <p class="panel-card__meta">每页最多 {{ perPage }} 条</p>
       </CardHeader>
@@ -992,48 +1056,6 @@ watch(selectedSubscriptionId, () => {
               <p class="detail-value">{{ subscriptionUrl }}</p>
             </div>
           </div>
-          <p v-else class="text-xs text-muted-foreground">
-            订阅地址未配置，请联系管理员轮转凭证或稍后重试。
-          </p>
-          <div v-if="hasSubscriptionUrl" class="cluster cluster--center">
-            <Button
-              size="sm"
-              variant="secondary"
-              type="button"
-              :disabled="!subscriptionUrl"
-              @click="copyDetail('订阅地址', subscriptionUrl)"
-            >
-              复制地址
-            </Button>
-            <Button
-              v-if="subscriptionUrl"
-              size="sm"
-              variant="ghost"
-              type="button"
-              :as="'a'"
-              :href="subscriptionUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              打开链接
-            </Button>
-            <Button size="sm" variant="ghost" type="button" @click="toggleQr">
-              {{ showQr ? '隐藏二维码' : '生成二维码' }}
-            </Button>
-          </div>
-          <div v-if="hasSubscriptionUrl && showQr" class="qr-panel">
-            <p v-if="qrLoading" class="text-xs text-muted-foreground">正在生成二维码...</p>
-            <img v-else-if="qrCodeUrl" :src="qrCodeUrl" alt="订阅二维码" class="qr-image" />
-            <p v-else class="text-xs text-muted-foreground">{{ qrError || '二维码不可用。' }}</p>
-          </div>
-          <Alert v-if="detailMessage" class="border-emerald-200 bg-emerald-50 text-emerald-800">
-            <AlertTitle>操作成功</AlertTitle>
-            <AlertDescription>{{ detailMessage }}</AlertDescription>
-          </Alert>
-          <Alert v-if="detailError" variant="destructive">
-            <AlertTitle>操作失败</AlertTitle>
-            <AlertDescription>{{ detailError }}</AlertDescription>
-          </Alert>
           <div class="cluster cluster--center">
             <Button
               size="sm"
